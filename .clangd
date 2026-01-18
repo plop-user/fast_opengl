@@ -1,0 +1,9 @@
+CompileFlags:
+  Add:
+    - -Iheaders/
+    - -Iheaders/glad/
+    - -Iheaders/KHR/
+    - -Iheaders/glm/
+    - -Iinclude
+    - -std=c++23
+
