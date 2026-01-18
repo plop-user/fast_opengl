@@ -1,3 +1,4 @@
 .clangd
 build/
 game
+compile_flags.txt
