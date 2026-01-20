@@ -198,7 +198,20 @@ unsigned int indices[] = {
     22, 23, 20
 };
 
-
+		// Create 100 offsets
+glm::vec2 translations[100];
+int index = 0;
+float offset = 0.1f;
+for(int y = -10; y < 10; y += 2)
+{
+    for(int x = -10; x < 10; x += 2)
+    {
+        glm::vec2 translation;
+        translation.x = (float)x / 1.0f + offset;
+        translation.y = (float)y / 1.0f + offset;
+        translations[index++] = translation;
+    }
+}
 	unsigned int VBO, VAO, EBO;
 	glGenVertexArrays(1, &VAO);
 	glGenBuffers(1, &VBO);
@@ -215,30 +228,44 @@ unsigned int indices[] = {
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
 
+
+	unsigned int instanceVBO;
+	glGenBuffers(1, &instanceVBO);
+	glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(glm::vec2) * 100, &translations[0], GL_STATIC_DRAW);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindVertexArray(VAO); // Open your existing VAO
+	
+	// Bind the instance VBO
+	glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
+	
+	// Set up the attribute pointer (Location 2, 2 floats, etc.)
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void*)0);
+	
+	// THIS IS THE MAGIC LINE
+	// 2 = The attribute location
+	// 1 = Advance this attribute once per DIVISOR (once per instance)
+	glVertexAttribDivisor(1, 1); 
+	
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindVertexArray(0);
 	// model matrix for sqaure
 	float angle = glm::radians(45.0f);	
 	glm::mat4 model = glm::mat4(1.0f);              // identity
-	model = glm::translate(model, glm::vec3(0.5f, 0.0f, 0.0f));
+	model = glm::translate(model, glm::vec3(0.0f, 0.0f, 0.0f));
 	model = glm::rotate(model, 0.0f, glm::vec3(0, 0, 1));
-	model = glm::scale(model, glm::vec3(0.3f));
+	model = glm::scale(model, glm::vec3(1.0f));
 	// view matrix (basically camera)
-	glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f));
+	glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -10.0f));
 	float aspectratio = (float)screenwidth/(float)screenheight;
 	glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspectratio, 0.1f, 100.0f);
-  
+ 	 
   
 	int modelLoc = glGetUniformLocation(shaderprogram, "model");
 	int viewLoc  = glGetUniformLocation(shaderprogram, "view");
 	int projLoc  = glGetUniformLocation(shaderprogram, "projection");
 	glEnable(GL_DEPTH_TEST);
-
-	// tring to render multiple sqaures with instanced rendering
-	glm::mat4 test[10];
-	for(int i = 0; i<10; i++){
-		test[i] = model;
-		test[i] = glm::translate(test[i], glm::vec3(0.5f+(float)i));
-	}
-
 
 
 	SDL_GetPerformanceFrequency();
@@ -268,9 +295,9 @@ unsigned int indices[] = {
 	time = time + deltatime;
 	if(time>0.01f){
 	
-//	model = glm::translate(model, glm::vec3(0.001f, 0.001f, 0.0f));
-	model = glm::rotate(model, glm::radians(1.0f), glm::vec3(0, 0, 1));
-//	model = glm::scale(model, glm::vec3(0.99f));
+//	model = glm::translate(model, glm::vec3(-0.01f, 0.0f, 0.0f));
+	model = glm::rotate(model, glm::radians(1.0f), glm::vec3(0, 1, 0));
+	model = glm::scale(model, glm::vec3(1.0001f));
 	time = 0;}
 
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -280,8 +307,8 @@ unsigned int indices[] = {
 	glUniformMatrix4fv(viewLoc,1, GL_FALSE, glm::value_ptr(view));
 	glUniformMatrix4fv(projLoc,1,GL_FALSE, glm::value_ptr(projection));
 	glBindVertexArray(VAO);
-	glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
-	
+//	glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
+	glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0, 100);
 	
 	SDL_GL_SwapWindow(window);
     }
