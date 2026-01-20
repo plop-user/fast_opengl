@@ -1,8 +1,8 @@
 # =========================
 # Compilers & target
 # =========================
-CXX     := g++
-CC      := gcc
+CXX     := clang++
+CC      := clang
 TARGET  := game
 
 # =========================
@@ -26,12 +26,12 @@ OBJS := $(CPP_OBJS) $(C_OBJS)
 # =========================
 # Flags
 # =========================
-CXXFLAGS := -std=c++23 -Wall -Wextra -g \
+CXXFLAGS := -std=c++23 -Wall -Wextra -O2 -g \
             -I$(INC_DIR) \
             -I$(INC_DIR)/glad \
             -I$(INC_DIR)/KHR
 
-CFLAGS   := -Wall -Wextra -g \
+CFLAGS   := -Wall -Wextra -O2 -g \
             -I$(INC_DIR) \
             -I$(INC_DIR)/glad \
             -I$(INC_DIR)/KHR

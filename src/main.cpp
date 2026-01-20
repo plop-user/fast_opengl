@@ -56,16 +56,69 @@ SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 8);
 	glAttachShader(shaderprogram, testvertex);
 	glAttachShader(shaderprogram, fragshader);
 	glLinkProgram(shaderprogram);
-	float vertices[] = {
-         0.5f,  0.5f, 0.0f,  // top right
-         0.5f, -0.5f, 0.0f,  // bottom right
-        -0.5f, -0.5f, 0.0f,  // bottom left
-        -0.5f,  0.5f, 0.0f   // top left 
-	};
-	unsigned int indices[] = {  // note that we start from 0!
-        0, 1, 3,  // first Triangle
-        1, 2, 3   // second Triangle
-	};
+
+//	float vertices[] = {
+//         0.5f,  0.5f, 0.0f,  // top right
+//         0.5f, -0.5f, 0.0f,  // bottom right
+//        -0.5f, -0.5f, 0.0f,  // bottom left
+//        -0.5f,  0.5f, 0.0f,
+//	0.5f,   0.5f, -0.5f,// top left
+//	-0.5f, 0.5f, -0.5f,
+//	0.5f, -0.5f, -0.5f,
+//	0.5f, -0.5f, -0.5f
+//	};
+//	unsigned int indices[] = {  // note that we start from 0!
+//        0, 1, 3,  // first Triangle
+//        1, 2, 3,   // second Triangle
+//	4, 5, 7,
+//	8, 6, 4
+//	
+//
+//	};
+//
+float vertices[] = {
+    // Front face (Z = 0.5)
+    -0.5f, -0.5f,  0.5f, // 0: Bottom-Left
+     0.5f, -0.5f,  0.5f, // 1: Bottom-Right
+     0.5f,  0.5f,  0.5f, // 2: Top-Right
+    -0.5f,  0.5f,  0.5f, // 3: Top-Left
+
+    // Back face (Z = -0.5)
+    -0.5f, -0.5f, -0.5f, // 4: Bottom-Left
+     0.5f, -0.5f, -0.5f, // 5: Bottom-Right
+     0.5f,  0.5f, -0.5f, // 6: Top-Right
+    -0.5f,  0.5f, -0.5f  // 7: Top-Left
+};
+
+unsigned int indices[] = {
+    // Front Face (Positive Z)
+    0, 1, 2,
+    2, 3, 0,
+
+    // Right Face (Positive X)
+    1, 5, 6,
+    6, 2, 1,
+
+    // Back Face (Negative Z)
+    // Note: The order seems reversed to maintain Counter-Clockwise winding
+    // when looking at the back of the object.
+    7, 6, 5,
+    5, 4, 7,
+
+    // Left Face (Negative X)
+    4, 0, 3,
+    3, 7, 4,
+
+    // Top Face (Positive Y)
+    3, 2, 6,
+    6, 7, 3,
+
+    // Bottom Face (Negative Y)
+    4, 5, 1,
+    1, 0, 4
+};
+
+
 
 	unsigned int VBO, VAO, EBO;
 	glGenVertexArrays(1, &VAO);
@@ -83,12 +136,12 @@ SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 8);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
 
-	// model matrix with gpu rendering example
-	float angle = 40;	
+	// model matrix for sqaure
+	float angle = glm::radians(45.0f);	
 	glm::mat4 model = glm::mat4(1.0f);              // identity
 	model = glm::translate(model, glm::vec3(0.5f, 0.0f, 0.0f));
-	model = glm::rotate(model, angle, glm::vec3(0, 0, 1));
-	model = glm::scale(model, glm::vec3(0.5f));
+	model = glm::rotate(model, 0.0f, glm::vec3(0, 0, 1));
+	model = glm::scale(model, glm::vec3(0.3f));
 	// view matrix (basically camera)
 	glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f));
 	float aspectratio = (float)screenwidth/(float)screenheight;
@@ -100,26 +153,57 @@ SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 8);
 	int projLoc  = glGetUniformLocation(shaderprogram, "projection");
 	glEnable(GL_DEPTH_TEST);
 
+	// tring to render multiple sqaures with instanced rendering
+	glm::mat4 test[10];
+	for(int i = 0; i<10; i++){
+		test[i] = model;
+		test[i] = glm::translate(test[i], glm::vec3(0.5f+(float)i));
+	}
 
 
 
+	SDL_GetPerformanceFrequency();
+	SDL_GetPerformanceCounter();
+	float LAST = 0;
+	float NOW = 0;
+	float time = 0;
 	while (1) {
 		SDL_Event e;
 		while (SDL_PollEvent(&e)) {
 		if (e.type == SDL_QUIT) return 0;
-        }
+		if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_RESIZED){
+				int newWidth = e.window.data1;
+				int newHeight = e.window.data2;
+				glViewport(0,0,newWidth, newHeight);
+
+				if(newHeight>0){float newasp = (float)newWidth/(float)newHeight;
+				projection = glm::perspective(glm::radians(45.0f), newasp,0.1f, 100.0f);
+				aspectratio = newasp;
+				}
+
+			}        }
+
+	LAST= NOW;
+	NOW = SDL_GetPerformanceCounter();
+	const float deltatime = (float)(NOW-LAST)/(float)SDL_GetPerformanceFrequency();
+	time = time + deltatime;
+	if(time>0.01f){
+	
+//	model = glm::translate(model, glm::vec3(0.0f, 0.00f, -0.1f));
+	model = glm::rotate(model, glm::radians(1.0f), glm::vec3(0, 0, 1));
+//	model = glm::scale(model, glm::vec3(0.99f));
+	time = 0;}
+
 	glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glUseProgram(shaderprogram);
 	glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
 	glUniformMatrix4fv(viewLoc,1, GL_FALSE, glm::value_ptr(view));
 	glUniformMatrix4fv(projLoc,1,GL_FALSE, glm::value_ptr(projection));
-
 	glBindVertexArray(VAO);
-	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+	glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, 0);
 	
 	
-
 	SDL_GL_SwapWindow(window);
     }
 	glDeleteVertexArrays(1,&VAO);
