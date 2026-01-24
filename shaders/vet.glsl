@@ -6,7 +6,8 @@ uniform mat4 view;
 uniform mat4 projection;
 out vec4 locdata;
 void main(){
-	vec3 newpos = apos + vec3(aoffset, 1.0);
-	gl_Position = projection * view * model * vec4(newpos, 1.0);
+	vec4 localPosition = model * vec4(apos, 1.0);
+	vec3 newpos = vec3(localPosition) + vec3(aoffset.x, 0.5, aoffset.y);
+	gl_Position = projection * view * vec4(newpos, 1.0);
 	locdata = gl_Position;
 }
