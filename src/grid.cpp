@@ -10,7 +10,6 @@
 #include <string>
 #include <glslread.h>
 
-
 static int gridview;
 static int gridpers;
 static unsigned int VAO;
@@ -105,6 +104,7 @@ glBindBuffer(GL_ARRAY_BUFFER, 0);
 glBindVertexArray(0);
 gridview = glGetUniformLocation(gridprogram, "view");
 gridpers = glGetUniformLocation(gridprogram, "perspective");
+
 }
 
 
@@ -113,6 +113,12 @@ void griddraw(glm::mat4 view, glm::mat4 pers){
 	glUniformMatrix4fv(gridview, 1, GL_FALSE, glm::value_ptr(view));
 	glUniformMatrix4fv(gridpers, 1, GL_FALSE, glm::value_ptr(pers));
 	glBindVertexArray(VAO);
-		
+		glLineWidth(2.0f);
 	glDrawArrays(GL_LINES, 0, lines.size() / 3);
+glLineWidth(1.0f);
 }
+
+
+
+
+

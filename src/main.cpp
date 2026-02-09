@@ -10,15 +10,14 @@
 #include <string>
 #include <glslread.h>
 #include <glm/gtc/type_ptr.hpp>
-#include <grid.h>
-#include <cube.h>
+#include <shapes.h>
 int main()
 {
 	const int screenwidth = 1280;
 	const int screenheight = 720;
 	SDL_Init(SDL_INIT_VIDEO);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
                         SDL_GL_CONTEXT_PROFILE_CORE);
 SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
@@ -47,7 +46,7 @@ SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 8);
 
 	glm::mat4 view = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -20.0f));
 	float aspectratio = (float)screenwidth/(float)screenheight;
-	glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspectratio, 0.1f, 100.0f);
+	glm::mat4 projection = glm::perspective(glm::radians(45.0f), aspectratio, 0.01f, 1000.0f);
 
 	glm::vec3 camerapos(0.0f, 0.0f, -20.0f);
 	glm::vec3 dir(0.0f, 1.0f, 0.0f);
@@ -61,9 +60,12 @@ SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 8);
 	view = glm::lookAt(camerapos, targetdir, dir);
 
 	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LESS);
 	
 	creategrid();
-	createcube();	
+	createcube();
+	//createsphere();
+	createicosphere();
 	SDL_GetPerformanceFrequency();
 	SDL_GetPerformanceCounter();
 	float LAST = 0;
@@ -110,17 +112,16 @@ if (e.type == SDL_MOUSEMOTION) {
 
 glm::vec3 worldUp(0.0f, 1.0f, 0.0f); 
 glm::vec3 right = glm::normalize(glm::cross(targetdir, worldUp));
-float cameraSpeed = 0.05f; 
+glm::vec3 flatForward = glm::normalize(glm::vec3(targetdir.x, 0.0f, targetdir.z));
+float cameraSpeed = 0.01f; 
 if(currentkeystates[SDL_SCANCODE_W]){
     // Move in the direction we are looking
-    camerapos.x += targetdir.x * cameraSpeed;
-  camerapos.z += targetdir.z * cameraSpeed;
 
+camerapos += flatForward * cameraSpeed;
+		}
 
-}
 if(currentkeystates[SDL_SCANCODE_S]){
-    camerapos.z -= targetdir.z * cameraSpeed;
-	camerapos.x -= targetdir.x * cameraSpeed;
+camerapos -= flatForward * cameraSpeed;
 }
 if(currentkeystates[SDL_SCANCODE_D]){
     // Move along the calculated Right vector
@@ -145,6 +146,15 @@ if(currentkeystates[SDL_SCANCODE_LSHIFT]){
 	time = time + deltatime;
 
 
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+
+	griddraw(view, projection);
+	cubedraw(view, projection, time);
+	//spheredraw(view, projection, time);
+	icospheredraw(view, projection,  time);
+
 	if(time>0.001f){
 	
 //	view = glm::translate(view, glm::vec3(0.0f, -0.001f, 0.0f));
@@ -152,11 +162,7 @@ if(currentkeystates[SDL_SCANCODE_LSHIFT]){
 //	model = glm::scale(model, glm::vec3(1.001f));
 	time = 0; }
 
-	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	griddraw(view, projection);
-	cubedraw(view, projection);
 	SDL_GL_SwapWindow(window);
 }
 //	glDeleteVertexArrays(1,&VAO);
