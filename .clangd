@@ -4,6 +4,7 @@ CompileFlags:
     - -Iheaders/glad/
     - -Iheaders/KHR/
     - -Iheaders/glm/
+    - -Iheaders/tinyobj/
     - -Iinclude
     - -std=c++23
 

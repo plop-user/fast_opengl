@@ -25,9 +25,138 @@ static int texlocation;
 static GLuint textureID;
 
 
+	float vertices[] = {
+    // POSITIONS          // TEXTURE COORDS (Optional but common reason for 24 verts)
+    // FRONT FACE (Normal: 0, 0, 1)
+    -0.5f, -0.5f,  0.5f,  0.0f, 0.0f, // 0
+     0.5f, -0.5f,  0.5f,  1.0f, 0.0f, // 1
+     0.5f,  0.5f,  0.5f,  1.0f, 1.0f, // 2
+    -0.5f,  0.5f,  0.5f,  0.0f, 1.0f, // 3
+
+    // BACK FACE (Normal: 0, 0, -1)
+    -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, // 4
+     0.5f, -0.5f, -0.5f,  1.0f, 0.0f, // 5
+     0.5f,  0.5f, -0.5f,  1.0f, 1.0f, // 6
+    -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, // 7
+
+    // LEFT FACE (Normal: -1, 0, 0)
+    -0.5f, -0.5f, -0.5f,  0.0f, 0.0f, // 8  <-- Same position as 4, but different attributes!
+    -0.5f, -0.5f,  0.5f,  1.0f, 0.0f, // 9
+    -0.5f,  0.5f,  0.5f,  1.0f, 1.0f, // 10
+    -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, // 11
+
+    // RIGHT FACE (Normal: 1, 0, 0)
+     0.5f, -0.5f, -0.5f,  0.0f, 0.0f, // 12
+     0.5f, -0.5f,  0.5f,  1.0f, 0.0f, // 13
+     0.5f,  0.5f,  0.5f,  1.0f, 1.0f, // 14
+     0.5f,  0.5f, -0.5f,  0.0f, 1.0f, // 15
+
+    // TOP FACE (Normal: 0, 1, 0)
+-0.5f,  0.5f,  0.5f,  0.0f, 0.0f, // 16
+     0.5f,  0.5f,  0.5f,  1.0f, 0.0f, // 17
+     0.5f,  0.5f, -0.5f,  1.0f, 1.0f, // 18
+    -0.5f,  0.5f, -0.5f,  0.0f, 1.0f, // 19
+
+    // BOTTOM FACE (Normal: 0, -1, 0)
+    -0.5f, -0.5f,  0.5f,  0.0f, 0.0f, // 20
+     0.5f, -0.5f,  0.5f,  1.0f, 0.0f, // 21
+     0.5f, -0.5f, -0.5f,  1.0f, 1.0f, // 22
+    -0.5f, -0.5f, -0.5f,  0.0f, 1.0f  // 23
+};
+
+unsigned int indices[] = {
+    // Front
+    0, 1, 2,
+    2, 3, 0,
+
+    // Back
+    4, 5, 6,
+    6, 7, 4,
+
+    // Left
+    8, 9, 10,
+    10, 11, 8,
+
+    // Right
+    12, 13, 14,
+    14, 15, 12,
+
+    // Top
+    16, 17, 18,
+    18, 19, 16,
+
+    // Bottom
+    20, 21, 22,
+    22, 23, 20
+};
 
 
+namespace tt {
 
+	typedef struct cube{
+		void shaderrun(){
+				std::string myvertext = readFile("shaders/vet.glsl");
+	const char* vertexfinal = myvertext.c_str();
+	unsigned int testvertex = glad_glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(testvertex, 1, &vertexfinal, NULL);
+	glCompileShader(testvertex);
+	int success;
+	char infoLog[512];
+	glGetShaderiv(testvertex, GL_COMPILE_STATUS, &success);
+	if (!success)
+	{ 
+	    glGetShaderInfoLog(testvertex, 512, NULL, infoLog);
+	    std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
+	} 
+
+
+	// doing frag shader
+	std::string fragtext = readFile("shaders/frag.glsl");
+	const char* fragtextc = fragtext.c_str();
+	unsigned int fragshader = glad_glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(fragshader, 1, &fragtextc, NULL);
+	glCompileShader(fragshader);
+    glGetShaderiv(fragshader, GL_COMPILE_STATUS, &success);
+    if (!success)
+    {
+        glGetShaderInfoLog(fragshader, 512, NULL, infoLog);
+        std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
+    }
+
+	//linking shaders
+	shaderprogram = glCreateProgram();
+	glAttachShader(shaderprogram, testvertex);
+	glAttachShader(shaderprogram, fragshader);
+	glLinkProgram(shaderprogram);
+
+
+	}
+		void texturehandle(){
+
+	SDL_Surface* cubef = IMG_Load("assets/map/texture_check.png");
+	if(!cubef){std::cout << "Image loading error";}
+
+	SDL_Surface* cubefs = SDL_ConvertSurfaceFormat(cubef, SDL_PIXELFORMAT_RGBA32, 0);
+	SDL_FreeSurface(cubef);
+
+	glGenTextures(1, &textureID);
+	glBindTexture(GL_TEXTURE_2D, textureID);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, cubefs->w, cubefs->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, cubefs->pixels);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	SDL_FreeSurface(cubefs);
+
+
+	}
+		void cubecreate(){
+
+	}
+};
+
+}
 
 void createcube(){
 	std::string myvertext = readFile("shaders/vet.glsl");

@@ -19,21 +19,21 @@ int main()
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
-                        SDL_GL_CONTEXT_PROFILE_CORE);
-SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 8);
+		     SDL_GL_CONTEXT_PROFILE_CORE);
+	SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
+	SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 8);
 	SDL_Window* window = SDL_CreateWindow(
-        "OpenGL Test",
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
-         screenwidth, screenheight,
-        SDL_WINDOW_OPENGL
-    );
+		"OpenGL Test",
+		SDL_WINDOWPOS_CENTERED,
+		SDL_WINDOWPOS_CENTERED,
+		screenwidth, screenheight,
+		SDL_WINDOW_OPENGL
+	);
 	SDL_GLContext ctx = SDL_GL_CreateContext(window);
 	if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
 		printf("Failed to init GLAD\n");
 		return -1;
-    }
+	}
 	glEnable(GL_MULTISAMPLE);
 
 	printf("OpenGL version: %s\n", glGetString(GL_VERSION));
@@ -61,113 +61,128 @@ SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 8);
 
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LESS);
-	
+
 	creategrid();
-	createcube();
+	//	createcube();
 	//createsphere();
-	createicosphere();
-	SDL_GetPerformanceFrequency();
-	SDL_GetPerformanceCounter();
-	float LAST = 0;
-	float NOW = 0;
-	float time = 0;
-SDL_SetRelativeMouseMode(SDL_TRUE);
+	Uint64 NOW = SDL_GetPerformanceCounter();
+	Uint64 LAST = 0;
+	float deltatime = 0;
+	SDL_SetRelativeMouseMode(SDL_TRUE);
+
+
+
+	// cube creating function
+	std::vector<std::string> textures = {
+		"assets/map/texture_check.png",  // Index 0
+		//  "assets/map/stone.png", // Index 1
+		//   "assets/map/grass.png"  // Index 2
+	};
+	std::vector<std::string> tt = {
+	};
+
+	initcubesystem(textures);
+	initspheresystem(tt, 3);
+	int c1 = addCube(1.0f, glm::vec3(0.0f, 0.0f, 0.0f), 0.0f);
+	addCube(1.0f, glm::vec3(1.0f,1.0f,1.0f), 0.0f);
+	addCube(1.0f, glm::vec3(2,0,0), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+	int s1 = addSphere(2.0, glm::vec3(0.0f,0.0f,0.0f), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+	addSphere(3.0, glm::vec3(2.0f,2.0f,2.0f), glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+	bufferInstanceData();
+	bufferInstanceDataSphere();
+
 	while (1) {
 		SDL_Event e;
 		while (SDL_PollEvent(&e)) {
-		if (e.type == SDL_QUIT) return 0;
-		if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_RESIZED){
+			if (e.type == SDL_QUIT) return 0;
+			if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_RESIZED){
 				int newWidth = e.window.data1;
 				int newHeight = e.window.data2;
 				glViewport(0,0,newWidth, newHeight);
 
 				if(newHeight>0){float newasp = (float)newWidth/(float)newHeight;
-				projection = glm::perspective(glm::radians(45.0f), newasp,0.1f, 100.0f);
-				aspectratio = newasp;
+					projection = glm::perspective(glm::radians(45.0f), newasp,0.1f, 100.0f);
+					aspectratio = newasp;
 				}
 
 			} 
-if (e.type == SDL_MOUSEMOTION) {
-    float xoffset = e.motion.xrel;
-    float yoffset = -e.motion.yrel; 
-	float sensitivity = 0.1f;
+			if (e.type == SDL_MOUSEMOTION) {
+				float xoffset = e.motion.xrel;
+				float yoffset = -e.motion.yrel; 
+				float sensitivity = 0.1f;
 
-    yaw   += xoffset * sensitivity;
-    pitch += yoffset * sensitivity;
+				yaw   += xoffset * sensitivity;
+				pitch += yoffset * sensitivity;
 
-    if(pitch > 89.0f)  pitch = 89.0f;
-    if(pitch < -89.0f) pitch = -89.0f;
+				if(pitch > 89.0f)  pitch = 89.0f;
+				if(pitch < -89.0f) pitch = -89.0f;
 
-    glm::vec3 direction;
-    direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-    direction.y = sin(glm::radians(pitch));
-    direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-    targetdir = glm::normalize(direction);
-}
-		}
-		
-	const Uint8* currentkeystates = SDL_GetKeyboardState(NULL);
-
-
-
-glm::vec3 worldUp(0.0f, 1.0f, 0.0f); 
-glm::vec3 right = glm::normalize(glm::cross(targetdir, worldUp));
-glm::vec3 flatForward = glm::normalize(glm::vec3(targetdir.x, 0.0f, targetdir.z));
-float cameraSpeed = 0.01f; 
-if(currentkeystates[SDL_SCANCODE_W]){
-    // Move in the direction we are looking
-
-camerapos += flatForward * cameraSpeed;
+				glm::vec3 direction;
+				direction.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+				direction.y = sin(glm::radians(pitch));
+				direction.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+				targetdir = glm::normalize(direction);
+			}
 		}
 
-if(currentkeystates[SDL_SCANCODE_S]){
-camerapos -= flatForward * cameraSpeed;
-}
-if(currentkeystates[SDL_SCANCODE_D]){
-    // Move along the calculated Right vector
-    camerapos += right * cameraSpeed;
-}
-if(currentkeystates[SDL_SCANCODE_A]){
-    camerapos -= right * cameraSpeed;
-}
+		LAST = NOW;
+		NOW = SDL_GetPerformanceCounter();
 
-// Up and Down (Fly up/down globally)
-if(currentkeystates[SDL_SCANCODE_SPACE]){
-    camerapos += worldUp * cameraSpeed;
-}
-if(currentkeystates[SDL_SCANCODE_LSHIFT]){
-    camerapos -= worldUp * cameraSpeed;
-}
-	view = glm::lookAt(camerapos, camerapos+targetdir, worldUp);
+		// Calculate time passed in seconds
+		deltatime = (float)((NOW - LAST) * 1) / (float)SDL_GetPerformanceFrequency();
 
-	LAST= NOW;
-	NOW = SDL_GetPerformanceCounter();
-	const float deltatime = (float)(NOW-LAST)/(float)SDL_GetPerformanceFrequency();
-	time = time + deltatime;
+		const Uint8* currentkeystates = SDL_GetKeyboardState(NULL);
 
 
-	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+		glm::vec3 worldUp(0.0f, 1.0f, 0.0f); 
+		glm::vec3 right = glm::normalize(glm::cross(targetdir, worldUp));
+		glm::vec3 flatForward = glm::normalize(glm::vec3(targetdir.x, 0.0f, targetdir.z));
+		float cameraSpeed = deltatime*8; 
+		if(currentkeystates[SDL_SCANCODE_W]){
+			// Move in the direction we are looking
+
+			camerapos += flatForward * cameraSpeed;
+		}
+
+		if(currentkeystates[SDL_SCANCODE_S]){
+			camerapos -= flatForward * cameraSpeed;
+		}
+		if(currentkeystates[SDL_SCANCODE_D]){
+			// Move along the calculated Right vector
+			camerapos += right * cameraSpeed;
+		}
+		if(currentkeystates[SDL_SCANCODE_A]){
+			camerapos -= right * cameraSpeed;
+		}
+
+		// Up and Down (Fly up/down globally)
+		if(currentkeystates[SDL_SCANCODE_SPACE]){
+			camerapos += worldUp * cameraSpeed;
+		}
+		if(currentkeystates[SDL_SCANCODE_LSHIFT]){
+			camerapos -= worldUp * cameraSpeed;
+		}
+		view = glm::lookAt(camerapos, camerapos+targetdir, worldUp);
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 
-	griddraw(view, projection);
-	cubedraw(view, projection, time);
-	//spheredraw(view, projection, time);
-	icospheredraw(view, projection,  time);
-
-	if(time>0.001f){
-	
-//	view = glm::translate(view, glm::vec3(0.0f, -0.001f, 0.0f));
-//	model = glm::rotate(model, glm::radians(1.0f), glm::vec3(1, 0, 0));
-//	model = glm::scale(model, glm::vec3(1.001f));
-	time = 0; }
+		griddraw(view, projection);
+		//	cubedraw(view, projection, deltatime);
+		//spheredraw(view, projection, time);
+		drawInstancedCubes(view, projection);
+		drawInstancedSpheres(view, projection);
+		//	view = glm::translate(view, glm::vec3(0.0f, -0.001f, 0.0f));
+		//	model = glm::rotate(model, glm::radians(1.0f), glm::vec3(1, 0, 0));
+		//	model = glm::scale(model, glm::vec3(1.001f));
 
 
-	SDL_GL_SwapWindow(window);
-}
-//	glDeleteVertexArrays(1,&VAO);
-//	glDeleteBuffers(1, &VBO);
-//	glDeleteBuffers(1, &EBO);
-//	glDeleteProgram(shaderprogram);
+		SDL_GL_SwapWindow(window);
+	}
+	//	glDeleteVertexArrays(1,&VAO);
+	//	glDeleteBuffers(1, &VBO);
+	//	glDeleteBuffers(1, &EBO);
+	//	glDeleteProgram(shaderprogram);
 }
 

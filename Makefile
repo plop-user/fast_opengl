@@ -3,7 +3,7 @@
 # =========================
 CXX     := clang++
 CC      := clang
-TARGET  := game
+TARGET  := test
 
 # =========================
 # Directories
@@ -29,12 +29,14 @@ OBJS := $(CPP_OBJS) $(C_OBJS)
 CXXFLAGS := -std=c++23 -Wall -Wextra -g \
             -I$(INC_DIR) \
             -I$(INC_DIR)/glad \
-            -I$(INC_DIR)/KHR
+            -I$(INC_DIR)/KHR  \
+	    -I$(INC_DIR)/tinyobj
 
 CFLAGS   := -Wall -Wextra -g \
             -I$(INC_DIR) \
             -I$(INC_DIR)/glad \
-            -I$(INC_DIR)/KHR
+            -I$(INC_DIR)/KHR  \
+	    -I$(INC_DIR)/tinyobj
 
 LDLIBS := \
     -lSDL2 \
