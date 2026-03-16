@@ -11,6 +11,8 @@
 #include <glslread.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <shapes.h>
+#include <obj.h>
+
 int main()
 {
 	const int screenwidth = 1280;
@@ -81,6 +83,10 @@ int main()
 	std::vector<std::string> tt = {
 	};
 
+
+
+
+
 	initcubesystem(textures);
 	initspheresystem(tt, 3);
 	int c1 = addCube(1.0f, glm::vec3(0.0f, 0.0f, 0.0f), 0.0f);
@@ -90,6 +96,19 @@ int main()
 	addSphere(3.0, glm::vec3(2.0f,2.0f,2.0f), glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
 	bufferInstanceData();
 	bufferInstanceDataSphere();
+
+
+
+
+
+	initSystem({"assets/earth.obj"}, {"assets/map/nightearth.png"});
+	addObject(0, {0,0,0}, 1.0, 0);
+	uploadInstanceData();
+	buildMDI();
+
+
+
+
 
 	while (1) {
 		SDL_Event e;
@@ -168,11 +187,12 @@ int main()
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 
+		drawScene(view, projection);
 		griddraw(view, projection);
 		//	cubedraw(view, projection, deltatime);
 		//spheredraw(view, projection, time);
-		drawInstancedCubes(view, projection);
-		drawInstancedSpheres(view, projection);
+//		drawInstancedCubes(view, projection);
+//		drawInstancedSpheres(view, projection);
 		//	view = glm::translate(view, glm::vec3(0.0f, -0.001f, 0.0f));
 		//	model = glm::rotate(model, glm::radians(1.0f), glm::vec3(1, 0, 0));
 		//	model = glm::scale(model, glm::vec3(1.001f));

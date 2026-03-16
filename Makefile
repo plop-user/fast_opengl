@@ -3,7 +3,7 @@
 # =========================
 CXX     := clang++
 CC      := clang
-TARGET  := test
+TARGET  := game
 
 # =========================
 # Directories

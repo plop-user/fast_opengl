@@ -51,10 +51,10 @@ void initcubesystem(const std::vector<std::string>& texturePaths){
 	unsigned int fragshader = glad_glCreateShader(GL_FRAGMENT_SHADER);
 	glShaderSource(fragshader, 1, &fragtextc, NULL);
 	glCompileShader(fragshader);
-	glGetShaderiv(testvertex, GL_COMPILE_STATUS, &success);
+	glGetShaderiv(fragshader, GL_COMPILE_STATUS, &success);
 	if (!success)
 	{ 
-		glGetShaderInfoLog(testvertex, 512, NULL, infoLog);
+		glGetShaderInfoLog(fragshader, 512, NULL, infoLog);
 		std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
 	}
 	shaderprogram = glCreateProgram();

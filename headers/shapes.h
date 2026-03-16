@@ -56,3 +56,5 @@ glm::vec3 getcubesize(int id);
 void setCubeColor(int id, glm::vec4 color);
 void updatecubeall();
 void updatecubebyid(int id);
+void rendertest();
+void test();
