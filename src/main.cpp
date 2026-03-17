@@ -101,8 +101,9 @@ int main()
 
 
 
-	initSystem({"assets/earth.obj"}, {"assets/map/nightearth.png"});
+	initSystem({"assets/check.obj"}, {"assets/map/nightearth.png"});
 	addObject(0, {0,0,0}, 1.0, 0);
+	
 	uploadInstanceData();
 	buildMDI();
 

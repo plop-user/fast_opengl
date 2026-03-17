@@ -38,6 +38,25 @@ struct ObjModel {
   size_t matrixCapacity = 0;
   size_t texCapacity = 0;
 };
+struct Vertex {
+	glm::vec3 pos;
+	glm::vec2 uv;
+	bool operator==(const Vertex& other) const {
+		return pos == other.pos && uv == other.uv;
+	}
+};
+
+struct VertexHash {
+    size_t operator()(const Vertex& v) const {
+        return ((std::hash<float>()(v.pos.x) ^
+                (std::hash<float>()(v.pos.y) << 1)) >> 1) ^
+                (std::hash<float>()(v.pos.z) << 1) ^
+                (std::hash<float>()(v.uv.x) << 1) ^
+                (std::hash<float>()(v.uv.y) << 1);
+    }
+};
+
+
 
 static std::vector<ObjModel> models;
 
@@ -95,29 +114,56 @@ ObjModel loadOBJ(const std::string& path) {
 
   tinyobj::LoadObj(&attrib, &shapes, &mats,& warn, &err, path.c_str());
 
-  std::vector<float> vertices;
-  std::vector<unsigned int> indices;
+std::vector<Vertex> uniqueVertices;
+std::vector<unsigned int> indices;
+std::unordered_map<Vertex, unsigned int, VertexHash> vertexMap;
 
-  for (auto& shape : shapes) {
-    for (auto& idx : shape.mesh.indices) {
-      
-	if(idx.vertex_index >=0 && 3*idx.vertex_index +2<attrib.vertices.size()){
-	vertices.push_back(attrib.vertices[3 * idx.vertex_index + 0]);
-      vertices.push_back(attrib.vertices[3 * idx.vertex_index + 1]);
-      vertices.push_back(attrib.vertices[3 * idx.vertex_index + 2]);
-	}
+for (const auto& shape : shapes)
+{
+    for (const auto& idx : shape.mesh.indices)
+    {
+        Vertex v{};
 
-      if (idx.texcoord_index >=0 && 2*idx.texcoord_index+1<attrib.texcoords.size()) {
-        vertices.push_back(attrib.texcoords[2 * idx.texcoord_index + 0]);
-        vertices.push_back(1.0f - attrib.texcoords[2 * idx.texcoord_index + 1]);
-      } else {
-        vertices.push_back(0);
-        vertices.push_back(0);
-      }
+        // position
+        v.pos = {
+            attrib.vertices[3*idx.vertex_index+0],
+            attrib.vertices[3*idx.vertex_index+1],
+            attrib.vertices[3*idx.vertex_index+2]
+        };
 
-      indices.push_back(indices.size());
+        // UV
+        if(idx.texcoord_index >= 0)
+        {
+            v.uv = {
+                attrib.texcoords[2*idx.texcoord_index+0],
+                1.0f - attrib.texcoords[2*idx.texcoord_index+1] // flip Y
+            };
+        }
+        else
+        {
+            v.uv = {0.0f, 0.0f};
+        }
+
+        // check if already exists
+        if(vertexMap.count(v) == 0)
+        {
+            vertexMap[v] = uniqueVertices.size();
+            uniqueVertices.push_back(v);
+        }
+
+        indices.push_back(vertexMap[v]);
     }
-  }
+}
+
+	std::vector<float> vertices;
+	for(auto& v: uniqueVertices){
+		vertices.push_back(v.pos.x);
+		vertices.push_back(v.pos.y);
+		vertices.push_back(v.pos.z);
+
+		vertices.push_back(v.uv.x);
+		vertices.push_back(v.uv.y);
+	}
 
   m.indexCount = indices.size();
 
@@ -208,8 +254,7 @@ if(!first)
   glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
 }
 
-void initSystem(const std::vector<std::string>& objPaths,
-                const std::vector<std::string>& texPaths) {
+void initSystem(const std::vector<std::string>& objPaths, const std::vector<std::string>& texPaths) {
   initShader();
 
   for (auto& p : objPaths) models.push_back(loadOBJ(p));
