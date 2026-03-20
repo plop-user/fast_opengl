@@ -17,13 +17,20 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
-struct DrawElementsIndirectCommand {
-  GLuint count;
-  GLuint instanceCount;
-  GLuint firstIndex;
-  GLuint baseVertex;
-  GLuint baseInstance;
+
+struct instance {
+ glm::vec3 position;
+    glm::vec3 scale;
+  glm::vec3 rotation;
+
+    bool dirty = true;
 };
+
+
+
+
+
+
 
 struct ObjModel {
   GLuint VAO, VBO, EBO;
@@ -31,13 +38,20 @@ struct ObjModel {
   GLuint instanceTexIndexVBO;
 
   int indexCount;
-
+  std::vector<instance> instances;
   std::vector<glm::mat4> matrices;
   std::vector<float> texIndices;
-
   size_t matrixCapacity = 0;
   size_t texCapacity = 0;
 };
+
+
+
+
+
+
+
+
 struct Vertex {
 	glm::vec3 pos;
 	glm::vec2 uv;
@@ -68,7 +82,6 @@ static GLint viewLoc;
 static GLint projLoc;
 static GLint texLoc;
 
-static std::vector<DrawElementsIndirectCommand> drawCommands;
 
 GLuint compileShader(const std::string& path, GLenum type) {
   std::string src = readFile(path);
@@ -264,91 +277,169 @@ void initSystem(const std::vector<std::string>& objPaths, const std::vector<std:
   glGenBuffers(1, &indirectBuffer);
 }
 
-int addObject(int modelID, glm::vec3 pos, float scale, float texID) {
+int addObject(int modelID, glm::vec3 pos, glm::vec3 scale, float texID) {
   ObjModel& m = models[modelID];
 
   glm::mat4 mat(1.0f);
+  instance inst;
+  inst.position = pos;
+  inst.scale = scale;
+  inst.rotation = glm::vec3({0.0f,0.0f,0.0f});
+  inst.dirty = true;
+  m.instances.push_back(inst);
+  m.texIndices.push_back(texID);
+  
   mat = glm::translate(mat, pos);
-  mat = glm::scale(mat, glm::vec3(scale));
+  mat = glm::scale(mat, scale);
+
+
+
+
 
   m.matrices.push_back(mat);
-  m.texIndices.push_back(texID);
-
-  return m.matrices.size() - 1;
+  
+  return m.instances.size() - 1;
 }
 
-void uploadInstanceData() {
-  for (auto& m : models) {
-    size_t msize = m.matrices.size() * sizeof(glm::mat4);
 
-    glBindBuffer(GL_ARRAY_BUFFER, m.instanceMatrixVBO);
 
-    if (msize > m.matrixCapacity) {
-      m.matrixCapacity = msize * 2;
-      glBufferData(GL_ARRAY_BUFFER, m.matrixCapacity, nullptr, GL_DYNAMIC_DRAW);
+void uploadInstanceData()
+{
+    for (auto& m : models)
+    {
+        // BUG FIX: Prevent GL_INVALID_VALUE on empty models
+        if (m.matrices.empty()) continue;
+
+        size_t msize = m.matrices.size() * sizeof(glm::mat4);
+        glBindBuffer(GL_ARRAY_BUFFER, m.instanceMatrixVBO);
+
+        if (msize > m.matrixCapacity)
+        {
+            m.matrixCapacity = msize * 2;
+            glBufferData(GL_ARRAY_BUFFER, m.matrixCapacity, nullptr, GL_DYNAMIC_DRAW);
+        }
+        glBufferSubData(GL_ARRAY_BUFFER, 0, msize, m.matrices.data());
+
+        size_t tsize = m.texIndices.size() * sizeof(float);
+        glBindBuffer(GL_ARRAY_BUFFER, m.instanceTexIndexVBO);
+
+        if (tsize > m.texCapacity)
+        {
+            m.texCapacity = tsize * 2;
+            glBufferData(GL_ARRAY_BUFFER, m.texCapacity, nullptr, GL_DYNAMIC_DRAW);
+        }
+        glBufferSubData(GL_ARRAY_BUFFER, 0, tsize, m.texIndices.data());
     }
 
-    glBufferSubData(GL_ARRAY_BUFFER, 0, msize, m.matrices.data());
-
-    size_t tsize = m.texIndices.size() * sizeof(float);
-
-    glBindBuffer(GL_ARRAY_BUFFER, m.instanceTexIndexVBO);
-
-    if (tsize > m.texCapacity) {
-      m.texCapacity = tsize * 2;
-      glBufferData(GL_ARRAY_BUFFER, m.texCapacity, nullptr, GL_DYNAMIC_DRAW);
-    }
-
-    glBufferSubData(GL_ARRAY_BUFFER, 0, tsize, m.texIndices.data());
-  }
-
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
-void buildMDI() {
-  drawCommands.clear();
 
-  GLuint baseInstance = 0;
 
-  for (auto& m : models) {
-    if (m.matrices.empty()) continue;
 
-    DrawElementsIndirectCommand cmd;
 
-    cmd.count = m.indexCount;
-    cmd.instanceCount = m.matrices.size();
-    cmd.firstIndex = 0;
-    cmd.baseVertex = 0;
-    cmd.baseInstance = baseInstance;
 
-    drawCommands.push_back(cmd);
-
-    baseInstance += m.matrices.size();
-  }
-
-  glBindBuffer(GL_DRAW_INDIRECT_BUFFER, indirectBuffer);
-
-  glBufferData(GL_DRAW_INDIRECT_BUFFER,
-               drawCommands.size() * sizeof(DrawElementsIndirectCommand),
-               drawCommands.data(), GL_STATIC_DRAW);
-}
 
 void drawScene(glm::mat4 view, glm::mat4 proj) {
-  glUseProgram(shaderprogram);
+    glUseProgram(shaderprogram);
 
-  glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
-  glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(proj));
+    glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
+    glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(proj));
+    
+    glUniform1i(texLoc, 0); 
 
-  glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D_ARRAY, textureArrayID);
-  
-	for(int i = 0; i<models.size(); i++){
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, textureArrayID);
+    
+    for(int i = 0; i < models.size(); i++){
+        ObjModel& m = models[i];
+        if(m.matrices.empty()) continue;
+        
+        glBindVertexArray(m.VAO);
+        
+        glDrawElementsInstanced(GL_TRIANGLES, m.indexCount, GL_UNSIGNED_INT, nullptr, m.matrices.size());
+    }
+}
 
-		ObjModel& m = models[i];
-		if(m.matrices.empty()) continue;
-		glBindVertexArray(m.VAO);
-		glDrawElementsInstanced(GL_TRIANGLES, m.indexCount, GL_UNSIGNED_INT, 0, m.matrices.size());
 
-	}
 
+void updateInstanceMatrices()
+{
+    for(auto& m : models)
+    {
+        for(int i = 0; i < m.instances.size(); i++)
+        {
+            auto& inst = m.instances[i];
+
+            if(!inst.dirty) continue;
+
+            glm::mat4 mat(1.0f);
+
+            mat = glm::translate(mat, inst.position);
+
+            mat = glm::rotate(mat, inst.rotation.x, {1,0,0});
+            mat = glm::rotate(mat, inst.rotation.y, {0,1,0});
+            mat = glm::rotate(mat, inst.rotation.z, {0,0,1});
+
+            mat = glm::scale(mat, inst.scale);
+
+            m.matrices[i] = mat;
+
+            inst.dirty = false;
+//	glBufferSubData(
+  //              GL_ARRAY_BUFFER, 
+    //            i * sizeof(glm::mat4), // Offset: skip past the previous 'i' matrices
+      //          sizeof(glm::mat4),     // Size: exactly one matrix
+        //        glm::value_ptr(mat)    // Pointer to the new matrix data
+          //  );
+        }
+    }
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+
+
+
+
+glm::vec3 setObjectRotation(int modelID, int objectID, glm::vec3 rot)
+{
+    ObjModel& m = models[modelID];
+
+    if(objectID < 0 || objectID >= m.instances.size()) {return glm::vec3{0.0f, 0.0f,0.0f};}
+
+	m.instances[objectID].rotation.x += rot.x;
+	m.instances[objectID].rotation.y += rot.y;
+	m.instances[objectID].rotation.z += rot.z;
+
+    m.instances[objectID].dirty = true;
+	return m.instances[objectID].rotation;
+}
+
+
+glm::vec3 translateObject(int modelID, int objectID, glm::vec3 pos){
+
+	ObjModel& m = models[modelID];
+
+	   if(objectID < 0 || objectID >= m.instances.size()){return glm::vec3{0.0f,0.0f,0.0f};}
+	m.instances[objectID].position.x += pos.x;
+	m.instances[objectID].position.y += pos.y;
+	m.instances[objectID].position.z += pos.z;
+
+	m.instances[objectID].dirty = true;
+	return m.instances[objectID].position;
+}
+
+
+
+glm::vec3 scaleObject(int modelID, int objectID, glm::vec3 scale){
+
+	ObjModel& m = models[modelID];
+
+	   if(objectID < 0 || objectID >= m.instances.size()){return glm::vec3{0.0f,0.0f,0.0f};}
+	m.instances[objectID].scale.x += scale.x;
+	m.instances[objectID].scale.y += scale.y;
+	m.instances[objectID].scale.z += scale.z;
+
+	m.instances[objectID].dirty = true;
+	return m.instances[objectID].scale;
 }

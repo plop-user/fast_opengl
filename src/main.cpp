@@ -102,10 +102,10 @@ int main()
 
 
 	initSystem({"assets/check.obj"}, {"assets/map/nightearth.png"});
-	addObject(0, {0,0,0}, 1.0, 0);
-	
+
+
+	int o1 = addObject(0, glm::vec3{0.0f, 5.0f, 0.0f}, glm::vec3{2.01f,2.0f,2.0f}, 0);
 	uploadInstanceData();
-	buildMDI();
 
 
 
@@ -187,7 +187,14 @@ int main()
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+float angleInDegrees = deltatime * 90.0f;
+float angleInRadians = glm::radians(angleInDegrees);
 
+// 3. Apply the continuously changing angle
+setObjectRotation(0, o1, glm::vec3{0.0f, angleInRadians, 0.0f});
+
+		updateInstanceMatrices();
+		uploadInstanceData();
 		drawScene(view, projection);
 		griddraw(view, projection);
 		//	cubedraw(view, projection, deltatime);
@@ -198,7 +205,7 @@ int main()
 		//	model = glm::rotate(model, glm::radians(1.0f), glm::vec3(1, 0, 0));
 		//	model = glm::scale(model, glm::vec3(1.001f));
 
-
+	
 		SDL_GL_SwapWindow(window);
 	}
 	//	glDeleteVertexArrays(1,&VAO);
