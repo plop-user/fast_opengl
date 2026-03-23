@@ -12,6 +12,9 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <shapes.h>
 #include <obj.h>
+#include <phy.h>
+
+#include <print>
 
 int main()
 {
@@ -67,9 +70,7 @@ int main()
 	creategrid();
 	//	createcube();
 	//createsphere();
-	Uint64 NOW = SDL_GetPerformanceCounter();
-	Uint64 LAST = 0;
-	float deltatime = 0;
+
 	SDL_SetRelativeMouseMode(SDL_TRUE);
 
 
@@ -87,15 +88,15 @@ int main()
 
 
 
-	initcubesystem(textures);
-	initspheresystem(tt, 3);
-	int c1 = addCube(1.0f, glm::vec3(0.0f, 0.0f, 0.0f), 0.0f);
-	addCube(1.0f, glm::vec3(1.0f,1.0f,1.0f), 0.0f);
-	addCube(1.0f, glm::vec3(2,0,0), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
-	int s1 = addSphere(2.0, glm::vec3(0.0f,0.0f,0.0f), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
-	addSphere(3.0, glm::vec3(2.0f,2.0f,2.0f), glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
-	bufferInstanceData();
-	bufferInstanceDataSphere();
+//	initcubesystem(textures);
+//	initspheresystem(tt, 3);
+//	int c1 = addCube(1.0f, glm::vec3(0.0f, 0.0f, 0.0f), 0.0f);
+//	addCube(1.0f, glm::vec3(1.0f,1.0f,1.0f), 0.0f);
+//	addCube(1.0f, glm::vec3(2,0,0), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+//	int s1 = addSphere(2.0, glm::vec3(0.0f,0.0f,0.0f), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
+//	addSphere(3.0, glm::vec3(2.0f,2.0f,2.0f), glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
+//	bufferInstanceData();
+//	bufferInstanceDataSphere();
 
 
 
@@ -104,15 +105,32 @@ int main()
 	initSystem({"assets/check.obj"}, {"assets/map/nightearth.png"});
 
 
-	int o1 = addObject(0, glm::vec3{0.0f, 5.0f, 0.0f}, glm::vec3{2.01f,2.0f,2.0f}, 0);
+	int o1 = addObject(0, glm::vec3{-0.97, 0.24, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
+	int o2 = addObject(0, glm::vec3{0.97, -0.24, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
+	int o3 = addObject(0, glm::vec3{0.0f, 0.0f, 0.0f}, glm::vec3{1.01f,1.0f,1.0f}, 0);
+
+
 	uploadInstanceData();
 
+size_t phy1 = addDynamicBody(0, o1, 1.0f, getData(0,o1).position);
+size_t phy2 = addDynamicBody(0, o2, 1.0f, getData(0,o2).position);
+size_t phy3 = addDynamicBody(0, o3, 1.0f, getData(0,o3).position);
+
+	getphydata(phy1).velocity = glm::vec3({0.46, 0.35, 0});
+	getphydata(phy2).velocity = glm::vec3({0.46, 0.35, 0});
+	getphydata(phy3).velocity = glm::vec3({-0.93, -0.70, 0});
 
 
-
+	Uint64 NOW = SDL_GetPerformanceCounter();
+	Uint64 LAST = 0;
+	double accumulator = 0.0;
+	const double dt = 0.01;
 
 	while (1) {
-		SDL_Event e;
+//	std::println("Body1 : x:{}, y:{}, z:{}", getData(0,o1).position.x, getData(0,o1).position.y, getData(0,o1).position.z);
+// std::println("Body2 : x:{}, y:{}, z:{}", getData(0,o2).position.x, getData(0,o2).position.y, getData(0,o2).position.z);
+
+	SDL_Event e;
 		while (SDL_PollEvent(&e)) {
 			if (e.type == SDL_QUIT) return 0;
 			if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_RESIZED){
@@ -145,11 +163,24 @@ int main()
 			}
 		}
 
-		LAST = NOW;
 		NOW = SDL_GetPerformanceCounter();
 
 		// Calculate time passed in seconds
-		deltatime = (float)((NOW - LAST) * 1) / (float)SDL_GetPerformanceFrequency();
+		double deltatime = (double)((NOW - LAST) * 1) / (double)SDL_GetPerformanceFrequency();
+		 
+
+		if (deltatime>0.25){deltatime = 0.25;}
+		LAST = NOW;
+		accumulator += deltatime;
+
+		while (accumulator >= dt){
+		        updateVelocityfirst(dt);
+			updateGravity();
+			updateVelocitysecond(dt);
+			accumulator -= dt;
+			continue;
+		}
+
 
 		const Uint8* currentkeystates = SDL_GetKeyboardState(NULL);
 
@@ -191,7 +222,7 @@ float angleInDegrees = deltatime * 90.0f;
 float angleInRadians = glm::radians(angleInDegrees);
 
 // 3. Apply the continuously changing angle
-setObjectRotation(0, o1, glm::vec3{0.0f, angleInRadians, 0.0f});
+//setObjectRotation(0, o1, glm::vec3{0.0f, angleInRadians, 0.0f});
 
 		updateInstanceMatrices();
 		uploadInstanceData();

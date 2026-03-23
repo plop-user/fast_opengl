@@ -3,16 +3,15 @@
 #include <glad/glad.h>
 #include <glslread.h>
 
-#include <cmath>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/vec4.hpp>
 #include <iostream>
-#include <numbers>
 #include <string>
 #include <vector>
+#include <optional>
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
@@ -24,6 +23,9 @@ struct instance {
   glm::vec3 rotation;
 
     bool dirty = true;
+
+	glm::vec3 velocity;
+	glm::vec3 acceleration;
 };
 
 
@@ -44,10 +46,6 @@ struct ObjModel {
   size_t matrixCapacity = 0;
   size_t texCapacity = 0;
 };
-
-
-
-
 
 
 
@@ -443,3 +441,47 @@ glm::vec3 scaleObject(int modelID, int objectID, glm::vec3 scale){
 	m.instances[objectID].dirty = true;
 	return m.instances[objectID].scale;
 }
+
+struct TransformParams {
+    std::optional<glm::vec3> scale;
+    std::optional<glm::vec3> position;
+    std::optional<glm::vec3> rotation;
+};
+
+void objectTransform(int modelID, int objectID, TransformParams temp){
+	ObjModel& m = models[modelID];
+
+   if(objectID < 0 || objectID >= m.instances.size()){return;} 
+
+	if(temp.position){m.instances[objectID].position = temp.position.value();}
+	if(temp.scale){m.instances[objectID].scale = temp.scale.value();}
+	if(temp.rotation){m.instances[objectID].rotation = temp.rotation.value();}
+	m.instances[objectID].dirty = true;
+
+}
+
+
+instance& getData(int modelID, int objectID){
+	ObjModel& m = models[modelID];
+
+	return m.instances[objectID];
+}
+
+int objectCount(int modelID){
+	ObjModel& m = models[modelID];
+
+
+	return m.instances.size(); 
+}
+
+int modelCount(){
+	return models.size();
+}
+
+
+
+
+
+
+
+

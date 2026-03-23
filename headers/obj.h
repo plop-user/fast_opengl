@@ -12,6 +12,10 @@
 
 
 
+int modelCount();
+
+
+
 
 struct instance {
  glm::vec3 position;
@@ -38,20 +42,29 @@ struct ObjModel {
 
 
 
+struct TransformParams {
+    std::optional<glm::vec3> scale;
+    std::optional<glm::vec3> position;
+    std::optional<glm::vec3> rotation;
+};
 
 
 
 
-
+void objectTransform(int modelID, int objectID, TransformParams temp);
 
 int addObject(int modelID, glm::vec3 pos, glm::vec3 scale, float texID) ;
-void buildMDI() ;
-GLuint compileShader(const std::string& path, GLenum type) ;
 void createTextureArray(const std::vector<std::string>& paths) ;
 void drawScene(glm::mat4 view, glm::mat4 proj) ;
 void initShader() ;
 void initSystem(const std::vector<std::string>& objPaths, const std::vector<std::string>& texPaths) ;
 ObjModel loadOBJ(const std::string& path) ;
-void setObjectRotation(int modelID, int objectID, glm::vec3 rot);
+int objectCount(int modelID);
+glm::vec3 scaleObject(int modelID, int objectID, glm::vec3 scale);
+glm::vec3 setObjectRotation(int modelID, int objectID, glm::vec3 rot);
+glm::vec3 translateObject(int modelID, int objectID, glm::vec3 pos);
 void updateInstanceMatrices();
 void uploadInstanceData();
+
+
+instance& getData(int modelID, int objectID);
