@@ -104,34 +104,35 @@ int main()
 
 	initSystem({"assets/check.obj"}, {"assets/map/nightearth.png"});
 
-	const float a = 10.0f;
-	float R = a/sqrt(3.0f);
+	const double a = 15.0;
+	double R = a/std::sqrt(3.0f);
+	const double G = 1.0;
+	const double mass = 100;
 	int o1 = addObject(0, glm::vec3{R, 0, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
 	int o2 = addObject(0, glm::vec3{-R/2.0f, a/2.0f, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
 	int o3 = addObject(0, glm::vec3{-R/2.0f, -a/2.0f, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
 
-	float v = sqrt(1.0f / a);
+	double v = std::sqrt((G*mass)/ a);
 
 	uploadInstanceData();
 
-size_t phy1 = addDynamicBody(0, o1, 1.0f, getData(0,o1).position);
-size_t phy2 = addDynamicBody(0, o2, 1.0f, getData(0,o2).position);
-size_t phy3 = addDynamicBody(0, o3, 1.0f, getData(0,o3).position);
+size_t phy1 = addDynamicBody(0, o1, mass, glm::dvec3(getData(0,o1).position));
+size_t phy2 = addDynamicBody(0, o2, mass, glm::dvec3(getData(0,o2).position));
+size_t phy3 = addDynamicBody(0, o3, mass, glm::dvec3(getData(0,o3).position));
 
-	getphydata(phy1).velocity = glm::vec3({0, v, 0});
-	getphydata(phy2).velocity = glm::vec3({-v * sqrt(3.0f)/2.0f, -v * 0.5f, 0.0f });
-	getphydata(phy3).velocity = glm::vec3({v * sqrt(3.0f)/2.0f, -v * 0.5f, 0.0f});
+	getphydata(phy1).velocity = glm::dvec3({0, v, 0});
+	getphydata(phy2).velocity = glm::dvec3({-v * std::sqrt(3.0f)/2.0f, -v * 0.5f, 0.0f });
+	getphydata(phy3).velocity = glm::dvec3({v * std::sqrt(3.0f)/2.0f, -v * 0.5f, 0.0f});
 
 
 	Uint64 NOW = SDL_GetPerformanceCounter();
 	Uint64 LAST = 0;
 	double accumulator = 0.0;
 	const double dt = 0.01;
-
 	while (1) {
 //	std::println("Body1 : x:{}, y:{}, z:{}", getData(0,o1).position.x, getData(0,o1).position.y, getData(0,o1).position.z);
 // std::println("Body2 : x:{}, y:{}, z:{}", getData(0,o2).position.x, getData(0,o2).position.y, getData(0,o2).position.z);
-
+SDL_GL_SetSwapInterval(1);
 	SDL_Event e;
 		while (SDL_PollEvent(&e)) {
 			if (e.type == SDL_QUIT) return 0;
@@ -180,7 +181,6 @@ size_t phy3 = addDynamicBody(0, o3, 1.0f, getData(0,o3).position);
 			updateGravity();
 			updateVelocitysecond(dt);
 			accumulator -= dt;
-			continue;
 		}
 
 
@@ -229,7 +229,7 @@ float angleInRadians = glm::radians(angleInDegrees);
 		updateInstanceMatrices();
 		uploadInstanceData();
 		drawScene(view, projection);
-//		griddraw(view, projection);
+		griddraw(view, projection);
 		//	cubedraw(view, projection, deltatime);
 		//spheredraw(view, projection, time);
 //		drawInstancedCubes(view, projection);
@@ -240,6 +240,9 @@ float angleInRadians = glm::radians(angleInDegrees);
 
 	
 		SDL_GL_SwapWindow(window);
+
+
+
 	}
 	//	glDeleteVertexArrays(1,&VAO);
 	//	glDeleteBuffers(1, &VBO);
