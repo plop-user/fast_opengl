@@ -102,12 +102,12 @@ int main()
 
 
 
-	initSystem({"assets/check.obj"}, {"assets/map/nightearth.png"});
+	initSystem({"assets/check.obj"}, {"assets/map/8k_sun.png"});
 
 	const double a = 15.0;
 	double R = a/std::sqrt(3.0f);
 	const double G = 1.0;
-	const double mass = 100;
+	const double mass = 10;
 	int o1 = addObject(0, glm::vec3{R, 0, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
 	int o2 = addObject(0, glm::vec3{-R/2.0f, a/2.0f, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
 	int o3 = addObject(0, glm::vec3{-R/2.0f, -a/2.0f, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
