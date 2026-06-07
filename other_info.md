@@ -247,10 +247,11 @@ Other OBJ and texture assets remain available for future scenes.
 
 ## Current Improvement Areas
 
-The renderer is in much better shape now, but the next useful steps are:
+The next worthwhile improvements are narrower than this refactor:
 
-1. Split mesh assets and render instances into named public/internal types instead of model buckets.
-2. Add explicit material/tint support instead of texture-layer only rendering.
-3. Track dirty instance ranges so uploads can use smaller `glBufferSubData(...)` regions.
-4. Push more validation into the public API for failed instance creation and invalid IDs.
-5. Consider moving the camera and scene orchestration out of `main.cpp` once the renderer API stabilizes.
+  - split mesh assets and instance storage into clearer named internal types
+  - add per-instance material/tint data instead of texture-layer only rendering
+  - track dirty upload ranges so uploadInstanceData() can update partial buffer regions
+  - make failed instance creation and invalid IDs return explicit errors instead of sentinel values
+
+
