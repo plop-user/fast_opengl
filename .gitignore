@@ -1,4 +1,5 @@
 .clangd
 build/
+.codex
 game
 compile_flags.txt

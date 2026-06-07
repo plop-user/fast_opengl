@@ -10,7 +10,7 @@
 #include <string>
 #include <glslread.h>
 #include <glm/gtc/type_ptr.hpp>
-#include <shapes.h>
+#include <grid.h>
 #include <obj.h>
 #include <phy.h>
 
@@ -34,11 +34,12 @@ int main()
 		screenwidth, screenheight,
 		SDL_WINDOW_OPENGL
 	);
-	SDL_GLContext ctx = SDL_GL_CreateContext(window);
+	SDL_GL_CreateContext(window);
 	if (!gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress)) {
 		printf("Failed to init GLAD\n");
 		return -1;
 	}
+	SDL_GL_SetSwapInterval(1);
 	glEnable(GL_MULTISAMPLE);
 
 	printf("OpenGL version: %s\n", glGetString(GL_VERSION));
@@ -68,57 +69,29 @@ int main()
 	glDepthFunc(GL_LESS);
 
 	creategrid();
-	//	createcube();
-	//createsphere();
+	ObjRenderer renderer;
 
 	SDL_SetRelativeMouseMode(SDL_TRUE);
 
-
-
-	// cube creating function
-	std::vector<std::string> textures = {
-		"assets/map/texture_check.png",  // Index 0
-		//  "assets/map/stone.png", // Index 1
-		//   "assets/map/grass.png"  // Index 2
-	};
-	std::vector<std::string> tt = {
-	};
-
-
-
-
-
-//	initcubesystem(textures);
-//	initspheresystem(tt, 3);
-//	int c1 = addCube(1.0f, glm::vec3(0.0f, 0.0f, 0.0f), 0.0f);
-//	addCube(1.0f, glm::vec3(1.0f,1.0f,1.0f), 0.0f);
-//	addCube(1.0f, glm::vec3(2,0,0), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
-//	int s1 = addSphere(2.0, glm::vec3(0.0f,0.0f,0.0f), glm::vec4(1.0f, 0.0f, 0.0f, 1.0f));
-//	addSphere(3.0, glm::vec3(2.0f,2.0f,2.0f), glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
-//	bufferInstanceData();
-//	bufferInstanceDataSphere();
-
-
-
-
-
-	initSystem({"assets/check.obj"}, {"assets/map/8k_sun.png"});
+	if (!renderer.init({"assets/check.obj"}, {"assets/map/8k_sun.png"})) {
+		return -1;
+	}
 
 	const double a = 15.0;
 	double R = a/std::sqrt(3.0f);
 	const double G = 1.0;
-	const double mass = 10;
-	int o1 = addObject(0, glm::vec3{R, 0, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
-	int o2 = addObject(0, glm::vec3{-R/2.0f, a/2.0f, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
-	int o3 = addObject(0, glm::vec3{-R/2.0f, -a/2.0f, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
+	const double mass = 100;
+	int o1 = renderer.addModelInstance(0, glm::vec3{R, 0, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
+	int o2 = renderer.addModelInstance(0, glm::vec3{-R/2.0f, a/2.0f, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
+	int o3 = renderer.addModelInstance(0, glm::vec3{-R/2.0f, -a/2.0f, 0}, glm::vec3{1.01f,1.0f,1.0f}, 0);
 
 	double v = std::sqrt((G*mass)/ a);
 
-	uploadInstanceData();
+	renderer.uploadInstanceData();
 
-size_t phy1 = addDynamicBody(0, o1, mass, glm::dvec3(getData(0,o1).position));
-size_t phy2 = addDynamicBody(0, o2, mass, glm::dvec3(getData(0,o2).position));
-size_t phy3 = addDynamicBody(0, o3, mass, glm::dvec3(getData(0,o3).position));
+size_t phy1 = addDynamicBody(0, o1, mass, glm::dvec3(renderer.getInstance(0,o1).position));
+size_t phy2 = addDynamicBody(0, o2, mass, glm::dvec3(renderer.getInstance(0,o2).position));
+size_t phy3 = addDynamicBody(0, o3, mass, glm::dvec3(renderer.getInstance(0,o3).position));
 
 	getphydata(phy1).velocity = glm::dvec3({0, v, 0});
 	getphydata(phy2).velocity = glm::dvec3({-v * std::sqrt(3.0f)/2.0f, -v * 0.5f, 0.0f });
@@ -130,9 +103,6 @@ size_t phy3 = addDynamicBody(0, o3, mass, glm::dvec3(getData(0,o3).position));
 	double accumulator = 0.0;
 	const double dt = 0.01;
 	while (1) {
-//	std::println("Body1 : x:{}, y:{}, z:{}", getData(0,o1).position.x, getData(0,o1).position.y, getData(0,o1).position.z);
-// std::println("Body2 : x:{}, y:{}, z:{}", getData(0,o2).position.x, getData(0,o2).position.y, getData(0,o2).position.z);
-SDL_GL_SetSwapInterval(1);
 	SDL_Event e;
 		while (SDL_PollEvent(&e)) {
 			if (e.type == SDL_QUIT) return 0;
@@ -177,9 +147,9 @@ SDL_GL_SetSwapInterval(1);
 		accumulator += deltatime;
 
 		while (accumulator >= dt){
-		        updateVelocityfirst(dt);
+		        updateVelocityfirst(renderer, dt);
 			updateGravity();
-			updateVelocitysecond(dt);
+			updateVelocitysecond(renderer, dt);
 			accumulator -= dt;
 		}
 
@@ -220,23 +190,10 @@ SDL_GL_SetSwapInterval(1);
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-float angleInDegrees = deltatime * 90.0f;
-float angleInRadians = glm::radians(angleInDegrees);
-
-// 3. Apply the continuously changing angle
-//setObjectRotation(0, o1, glm::vec3{0.0f, angleInRadians, 0.0f});
-
-		updateInstanceMatrices();
-		uploadInstanceData();
-		drawScene(view, projection);
+		renderer.updateInstanceMatrices();
+		renderer.uploadInstanceData();
+		renderer.draw(view, projection);
 		griddraw(view, projection);
-		//	cubedraw(view, projection, deltatime);
-		//spheredraw(view, projection, time);
-//		drawInstancedCubes(view, projection);
-//		drawInstancedSpheres(view, projection);
-		//	view = glm::translate(view, glm::vec3(0.0f, -0.001f, 0.0f));
-		//	model = glm::rotate(model, glm::radians(1.0f), glm::vec3(1, 0, 0));
-		//	model = glm::scale(model, glm::vec3(1.001f));
 
 	
 		SDL_GL_SwapWindow(window);
@@ -249,4 +206,3 @@ float angleInRadians = glm::radians(angleInDegrees);
 	//	glDeleteBuffers(1, &EBO);
 	//	glDeleteProgram(shaderprogram);
 }
-

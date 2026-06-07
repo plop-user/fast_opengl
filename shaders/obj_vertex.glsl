@@ -10,7 +10,7 @@ layout (location = 5) in vec4 iMat2;
 layout (location = 6) in vec4 iMat3;
 
 // Per-instance texture layer
-layout (location = 7) in float texIndex;
+layout (location = 7) in int texIndex;
 
 uniform mat4 view;
 uniform mat4 projection;
@@ -25,5 +25,5 @@ void main()
     gl_Position = projection * view * model * vec4(aPos, 1.0);
 
     TexCoord = aTexCoord;
-    TexIndex = int(texIndex);
+    TexIndex = texIndex;
 }

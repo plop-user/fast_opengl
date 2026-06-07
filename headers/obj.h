@@ -1,70 +1,61 @@
 #pragma once
+
 #include <glm/glm.hpp>
-#include <glm/vec4.hpp>
-#include <glm/mat4x4.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
-#include <vector>
+
+#include <memory>
+#include <optional>
 #include <string>
-#include <stdlib.h>
-
-
-
-
-
-int modelCount();
-
-
-
-
-struct instance {
- glm::vec3 position;
-    glm::vec3 scale;
-  glm::vec3 rotation;
-
-    bool dirty = true;
-};
-
-
-
-struct ObjModel {
-  GLuint VAO, VBO, EBO;
-  GLuint instanceMatrixVBO;
-  GLuint instanceTexIndexVBO;
-
-  int indexCount;
-  std::vector<instance> instances;
-  std::vector<glm::mat4> matrices;
-  std::vector<float> texIndices;
-  size_t matrixCapacity = 0;
-  size_t texCapacity = 0;
-};
-
-
+#include <vector>
 
 struct TransformParams {
-    std::optional<glm::vec3> scale;
-    std::optional<glm::vec3> position;
-    std::optional<glm::vec3> rotation;
+  std::optional<glm::vec3> scale;
+  std::optional<glm::vec3> position;
+  std::optional<glm::vec3> rotation;
 };
 
+struct RenderInstance {
+  glm::vec3 position{0.0f};
+  glm::vec3 scale{1.0f};
+  glm::vec3 rotation{0.0f};
+  bool dirty = true;
+};
 
+class ObjRenderer {
+public:
+  struct RendererState;
 
+  ObjRenderer();
+  ~ObjRenderer();
 
-void objectTransform(int modelID, int objectID, TransformParams temp);
+  ObjRenderer(const ObjRenderer &) = delete;
+  ObjRenderer &operator=(const ObjRenderer &) = delete;
 
-int addObject(int modelID, glm::vec3 pos, glm::vec3 scale, float texID) ;
-void createTextureArray(const std::vector<std::string>& paths) ;
-void drawScene(glm::mat4 view, glm::mat4 proj) ;
-void initShader() ;
-void initSystem(const std::vector<std::string>& objPaths, const std::vector<std::string>& texPaths) ;
-ObjModel loadOBJ(const std::string& path) ;
-int objectCount(int modelID);
-glm::vec3 scaleObject(int modelID, int objectID, glm::vec3 scale);
-glm::vec3 setObjectRotation(int modelID, int objectID, glm::vec3 rot);
-glm::vec3 translateObject(int modelID, int objectID, glm::vec3 pos);
-void updateInstanceMatrices();
-void uploadInstanceData();
+  ObjRenderer(ObjRenderer &&) noexcept;
+  ObjRenderer &operator=(ObjRenderer &&) noexcept;
 
+  bool init(const std::vector<std::string> &obj_paths,
+            const std::vector<std::string> &texture_paths);
+  void shutdown();
 
-instance& getData(int modelID, int objectID);
+  int addModelInstance(int model_id, glm::vec3 position, glm::vec3 scale,
+                       int texture_layer);
+
+  void draw(const glm::mat4 &view, const glm::mat4 &projection) const;
+  void updateInstanceMatrices();
+  void uploadInstanceData();
+
+  void transformInstance(int model_id, int object_id,
+                         const TransformParams &params);
+  glm::vec3 translateInstance(int model_id, int object_id, glm::vec3 delta);
+  glm::vec3 scaleInstance(int model_id, int object_id, glm::vec3 delta);
+  glm::vec3 rotateInstance(int model_id, int object_id, glm::vec3 delta);
+
+  RenderInstance &getInstance(int model_id, int object_id);
+  const RenderInstance &getInstance(int model_id, int object_id) const;
+
+  int objectCount(int model_id) const;
+  int modelCount() const;
+
+private:
+  std::unique_ptr<RendererState> state_;
+};
