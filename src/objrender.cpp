@@ -7,6 +7,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#include <cstddef>
 #include <iostream>
 #include <stdexcept>
 #include <unordered_map>
@@ -92,24 +93,65 @@ GLuint linkProgram(GLuint vertex_shader, GLuint fragment_shader) {
 } // namespace
 
 struct ObjRenderer::RendererState {
+  struct DirtyRange {
+    bool active = false;
+    size_t first = 0;
+    size_t last = 0;
+
+    void include(size_t index) {
+      if (!active) {
+        active = true;
+        first = index;
+        last = index;
+        return;
+      }
+      if (index < first) {
+        first = index;
+      }
+      if (index > last) {
+        last = index;
+      }
+    }
+
+    void reset() {
+      active = false;
+      first = 0;
+      last = 0;
+    }
+  };
+
   struct MeshAsset {
     GLuint vao = 0;
     GLuint vbo = 0;
     GLuint ebo = 0;
-    GLuint instance_matrix_vbo = 0;
-    GLuint instance_tex_index_vbo = 0;
     GLsizei index_count = 0;
   };
 
-  struct ModelBucket {
-    MeshAsset mesh;
-    std::vector<RenderInstance> instances;
-    std::vector<glm::mat4> matrices;
-    std::vector<int> texture_layers;
+  struct InstanceBuffers {
+    GLuint matrix_vbo = 0;
+    GLuint material_vbo = 0;
     size_t matrix_capacity_bytes = 0;
-    size_t texture_capacity_bytes = 0;
-    bool matrix_upload_dirty = false;
-    bool texture_upload_dirty = false;
+    size_t material_capacity_bytes = 0;
+  };
+
+  struct SceneInstance {
+    RenderInstance transform;
+    InstanceMaterial material;
+  };
+
+  struct GpuInstanceMaterial {
+    int texture_layer = -1;
+    glm::vec4 tint{1.0f, 1.0f, 1.0f, 1.0f};
+  };
+
+  struct SceneModel {
+    MeshAsset mesh;
+    InstanceBuffers buffers;
+    std::vector<SceneInstance> instances;
+    std::vector<glm::mat4> matrices;
+    std::vector<GpuInstanceMaterial> gpu_materials;
+    DirtyRange matrix_dirty_range;
+    DirtyRange material_dirty_range;
   };
 
   GLuint shader_program = 0;
@@ -117,7 +159,7 @@ struct ObjRenderer::RendererState {
   GLint view_location = -1;
   GLint projection_location = -1;
   GLint texture_array_location = -1;
-  std::vector<ModelBucket> models;
+  std::vector<SceneModel> models;
 };
 
 ObjRenderer::ObjRenderer() : state_(std::make_unique<RendererState>()) {}
@@ -178,8 +220,8 @@ ObjRenderer::RendererState::MeshAsset loadMeshAsset(const std::string &path) {
                      1.0f - attrib.texcoords[2 * idx.texcoord_index + 1]};
       }
 
-      const auto [it, inserted] =
-          vertex_map.emplace(vertex, static_cast<unsigned int>(unique_vertices.size()));
+      const auto [it, inserted] = vertex_map.emplace(
+          vertex, static_cast<unsigned int>(unique_vertices.size()));
       if (inserted) {
         unique_vertices.push_back(vertex);
       }
@@ -203,8 +245,6 @@ ObjRenderer::RendererState::MeshAsset loadMeshAsset(const std::string &path) {
   glGenVertexArrays(1, &mesh.vao);
   glGenBuffers(1, &mesh.vbo);
   glGenBuffers(1, &mesh.ebo);
-  glGenBuffers(1, &mesh.instance_matrix_vbo);
-  glGenBuffers(1, &mesh.instance_tex_index_vbo);
 
   glBindVertexArray(mesh.vao);
 
@@ -224,7 +264,20 @@ ObjRenderer::RendererState::MeshAsset loadMeshAsset(const std::string &path) {
   glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
                         (void *)(3 * sizeof(float)));
 
-  glBindBuffer(GL_ARRAY_BUFFER, mesh.instance_matrix_vbo);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glBindVertexArray(0);
+
+  return mesh;
+}
+
+ObjRenderer::RendererState::InstanceBuffers createInstanceBuffers(GLuint vao) {
+  ObjRenderer::RendererState::InstanceBuffers buffers{};
+  glGenBuffers(1, &buffers.matrix_vbo);
+  glGenBuffers(1, &buffers.material_vbo);
+
+  glBindVertexArray(vao);
+
+  glBindBuffer(GL_ARRAY_BUFFER, buffers.matrix_vbo);
   const GLsizei vec4_size = sizeof(glm::vec4);
   for (GLuint i = 0; i < 4; ++i) {
     glEnableVertexAttribArray(3 + i);
@@ -233,20 +286,32 @@ ObjRenderer::RendererState::MeshAsset loadMeshAsset(const std::string &path) {
     glVertexAttribDivisor(3 + i, 1);
   }
 
-  glBindBuffer(GL_ARRAY_BUFFER, mesh.instance_tex_index_vbo);
+  glBindBuffer(GL_ARRAY_BUFFER, buffers.material_vbo);
   glEnableVertexAttribArray(7);
-  glVertexAttribIPointer(7, 1, GL_INT, sizeof(int), (void *)0);
+  glVertexAttribIPointer(
+      7, 1, GL_INT,
+      sizeof(ObjRenderer::RendererState::GpuInstanceMaterial),
+      (void *)offsetof(ObjRenderer::RendererState::GpuInstanceMaterial,
+                       texture_layer));
   glVertexAttribDivisor(7, 1);
+
+  glEnableVertexAttribArray(8);
+  glVertexAttribPointer(
+      8, 4, GL_FLOAT, GL_FALSE,
+      sizeof(ObjRenderer::RendererState::GpuInstanceMaterial),
+      (void *)offsetof(ObjRenderer::RendererState::GpuInstanceMaterial, tint));
+  glVertexAttribDivisor(8, 1);
 
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   glBindVertexArray(0);
 
-  return mesh;
+  return buffers;
 }
 
 GLuint createTextureArray(const std::vector<std::string> &paths) {
   if (paths.empty()) {
-    throw std::runtime_error("Texture array initialization requires at least one texture.");
+    throw std::runtime_error(
+        "Texture array initialization requires at least one texture.");
   }
 
   if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) {
@@ -282,8 +347,8 @@ GLuint createTextureArray(const std::vector<std::string> &paths) {
     if (surface->w != width || surface->h != height) {
       SDL_FreeSurface(surface);
       glDeleteTextures(1, &texture_array_id);
-      throw std::runtime_error("Texture dimensions must match for texture array: " +
-                               paths[layer]);
+      throw std::runtime_error(
+          "Texture dimensions must match for texture array: " + paths[layer]);
     }
 
     SDL_Surface *formatted =
@@ -311,13 +376,17 @@ GLuint createTextureArray(const std::vector<std::string> &paths) {
   return texture_array_id;
 }
 
+void destroyInstanceBuffers(ObjRenderer::RendererState::InstanceBuffers &buffers) {
+  if (buffers.material_vbo != 0) {
+    glDeleteBuffers(1, &buffers.material_vbo);
+  }
+  if (buffers.matrix_vbo != 0) {
+    glDeleteBuffers(1, &buffers.matrix_vbo);
+  }
+  buffers = {};
+}
+
 void destroyMeshAsset(ObjRenderer::RendererState::MeshAsset &mesh) {
-  if (mesh.instance_tex_index_vbo != 0) {
-    glDeleteBuffers(1, &mesh.instance_tex_index_vbo);
-  }
-  if (mesh.instance_matrix_vbo != 0) {
-    glDeleteBuffers(1, &mesh.instance_matrix_vbo);
-  }
   if (mesh.ebo != 0) {
     glDeleteBuffers(1, &mesh.ebo);
   }
@@ -328,6 +397,23 @@ void destroyMeshAsset(ObjRenderer::RendererState::MeshAsset &mesh) {
     glDeleteVertexArrays(1, &mesh.vao);
   }
   mesh = {};
+}
+
+void releaseSceneModelInstanceStorage(ObjRenderer::RendererState::SceneModel &model) {
+  model.instances.clear();
+  model.matrices.clear();
+  model.gpu_materials.clear();
+  model.matrix_dirty_range.reset();
+  model.material_dirty_range.reset();
+
+  glBindBuffer(GL_ARRAY_BUFFER, model.buffers.matrix_vbo);
+  glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+  glBindBuffer(GL_ARRAY_BUFFER, model.buffers.material_vbo);
+  glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+  model.buffers.matrix_capacity_bytes = 0;
+  model.buffers.material_capacity_bytes = 0;
 }
 
 } // namespace
@@ -355,9 +441,10 @@ bool ObjRenderer::init(const std::vector<std::string> &obj_paths,
 
     state_->models.reserve(obj_paths.size());
     for (const auto &path : obj_paths) {
-      RendererState::ModelBucket bucket{};
-      bucket.mesh = loadMeshAsset(path);
-      state_->models.push_back(std::move(bucket));
+      RendererState::SceneModel scene_model{};
+      scene_model.mesh = loadMeshAsset(path);
+      scene_model.buffers = createInstanceBuffers(scene_model.mesh.vao);
+      state_->models.push_back(std::move(scene_model));
     }
 
     state_->texture_array_id = createTextureArray(texture_paths);
@@ -376,6 +463,8 @@ void ObjRenderer::shutdown() {
   }
 
   for (auto &model : state_->models) {
+    releaseSceneModelInstanceStorage(model);
+    destroyInstanceBuffers(model.buffers);
     destroyMeshAsset(model.mesh);
   }
   state_->models.clear();
@@ -395,27 +484,48 @@ void ObjRenderer::shutdown() {
   state_->texture_array_location = -1;
 }
 
+void ObjRenderer::clearScene() {
+  for (auto &model : state_->models) {
+    releaseSceneModelInstanceStorage(model);
+  }
+}
+
 int ObjRenderer::addModelInstance(int model_id, glm::vec3 position,
                                   glm::vec3 scale, int texture_layer) {
+  InstanceMaterial material;
+  material.texture_layer = texture_layer;
+  return addModelInstance(model_id, position, scale, material);
+}
+
+int ObjRenderer::addModelInstance(int model_id, glm::vec3 position,
+                                  glm::vec3 scale,
+                                  const InstanceMaterial &material) {
   if (model_id < 0 || model_id >= static_cast<int>(state_->models.size())) {
     return -1;
   }
 
   auto &model = state_->models[model_id];
-  RenderInstance instance;
-  instance.position = position;
-  instance.scale = scale;
+  const size_t index = model.instances.size();
+
+  RendererState::SceneInstance scene_instance;
+  scene_instance.transform.position = position;
+  scene_instance.transform.scale = scale;
+  scene_instance.material = material;
 
   glm::mat4 matrix(1.0f);
   matrix = glm::translate(matrix, position);
   matrix = glm::scale(matrix, scale);
 
-  model.instances.push_back(instance);
+  RendererState::GpuInstanceMaterial gpu_material;
+  gpu_material.texture_layer = material.texture_layer;
+  gpu_material.tint = material.tint;
+
+  model.instances.push_back(scene_instance);
   model.matrices.push_back(matrix);
-  model.texture_layers.push_back(texture_layer);
-  model.matrix_upload_dirty = true;
-  model.texture_upload_dirty = true;
-  return static_cast<int>(model.instances.size()) - 1;
+  model.gpu_materials.push_back(gpu_material);
+  model.matrix_dirty_range.include(index);
+  model.material_dirty_range.include(index);
+  return static_cast<int>(index);
 }
 
 void ObjRenderer::draw(const glm::mat4 &view,
@@ -449,9 +559,8 @@ void ObjRenderer::draw(const glm::mat4 &view,
 
 void ObjRenderer::updateInstanceMatrices() {
   for (auto &model : state_->models) {
-    bool changed = false;
     for (size_t i = 0; i < model.instances.size(); ++i) {
-      auto &instance = model.instances[i];
+      auto &instance = model.instances[i].transform;
       if (!instance.dirty) {
         continue;
       }
@@ -464,12 +573,8 @@ void ObjRenderer::updateInstanceMatrices() {
       matrix = glm::scale(matrix, instance.scale);
 
       model.matrices[i] = matrix;
+      model.matrix_dirty_range.include(i);
       instance.dirty = false;
-      changed = true;
-    }
-
-    if (changed) {
-      model.matrix_upload_dirty = true;
     }
   }
 }
@@ -480,29 +585,45 @@ void ObjRenderer::uploadInstanceData() {
       continue;
     }
 
-    if (model.matrix_upload_dirty) {
-      const size_t matrix_bytes = model.matrices.size() * sizeof(glm::mat4);
-      glBindBuffer(GL_ARRAY_BUFFER, model.mesh.instance_matrix_vbo);
-      if (matrix_bytes > model.matrix_capacity_bytes) {
-        model.matrix_capacity_bytes = matrix_bytes * 2;
-        glBufferData(GL_ARRAY_BUFFER, model.matrix_capacity_bytes, nullptr,
-                     GL_DYNAMIC_DRAW);
+    if (model.matrix_dirty_range.active) {
+      const size_t total_bytes = model.matrices.size() * sizeof(glm::mat4);
+      glBindBuffer(GL_ARRAY_BUFFER, model.buffers.matrix_vbo);
+      if (total_bytes > model.buffers.matrix_capacity_bytes) {
+        model.buffers.matrix_capacity_bytes = total_bytes * 2;
+        glBufferData(GL_ARRAY_BUFFER, model.buffers.matrix_capacity_bytes,
+                     nullptr, GL_DYNAMIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, total_bytes, model.matrices.data());
+      } else {
+        const size_t first = model.matrix_dirty_range.first;
+        const size_t count =
+            model.matrix_dirty_range.last - model.matrix_dirty_range.first + 1;
+        glBufferSubData(GL_ARRAY_BUFFER, first * sizeof(glm::mat4),
+                        count * sizeof(glm::mat4), model.matrices.data() + first);
       }
-      glBufferSubData(GL_ARRAY_BUFFER, 0, matrix_bytes, model.matrices.data());
-      model.matrix_upload_dirty = false;
+      model.matrix_dirty_range.reset();
     }
 
-    if (model.texture_upload_dirty) {
-      const size_t texture_bytes = model.texture_layers.size() * sizeof(int);
-      glBindBuffer(GL_ARRAY_BUFFER, model.mesh.instance_tex_index_vbo);
-      if (texture_bytes > model.texture_capacity_bytes) {
-        model.texture_capacity_bytes = texture_bytes * 2;
-        glBufferData(GL_ARRAY_BUFFER, model.texture_capacity_bytes, nullptr,
-                     GL_DYNAMIC_DRAW);
+    if (model.material_dirty_range.active) {
+      const size_t total_bytes =
+          model.gpu_materials.size() *
+          sizeof(RendererState::GpuInstanceMaterial);
+      glBindBuffer(GL_ARRAY_BUFFER, model.buffers.material_vbo);
+      if (total_bytes > model.buffers.material_capacity_bytes) {
+        model.buffers.material_capacity_bytes = total_bytes * 2;
+        glBufferData(GL_ARRAY_BUFFER, model.buffers.material_capacity_bytes,
+                     nullptr, GL_DYNAMIC_DRAW);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, total_bytes,
+                        model.gpu_materials.data());
+      } else {
+        const size_t first = model.material_dirty_range.first;
+        const size_t count = model.material_dirty_range.last -
+                             model.material_dirty_range.first + 1;
+        glBufferSubData(GL_ARRAY_BUFFER,
+                        first * sizeof(RendererState::GpuInstanceMaterial),
+                        count * sizeof(RendererState::GpuInstanceMaterial),
+                        model.gpu_materials.data() + first);
       }
-      glBufferSubData(GL_ARRAY_BUFFER, 0, texture_bytes,
-                      model.texture_layers.data());
-      model.texture_upload_dirty = false;
+      model.material_dirty_range.reset();
     }
   }
 
@@ -519,7 +640,7 @@ void ObjRenderer::transformInstance(int model_id, int object_id,
     return;
   }
 
-  auto &instance = instances[object_id];
+  auto &instance = instances[object_id].transform;
   if (params.position) {
     instance.position = *params.position;
   }
@@ -556,6 +677,36 @@ glm::vec3 ObjRenderer::rotateInstance(int model_id, int object_id,
   return instance.rotation;
 }
 
+void ObjRenderer::setInstanceMaterial(int model_id, int object_id,
+                                      const InstanceMaterial &material) {
+  if (model_id < 0 || model_id >= static_cast<int>(state_->models.size())) {
+    return;
+  }
+  auto &model = state_->models[model_id];
+  if (object_id < 0 || object_id >= static_cast<int>(model.instances.size())) {
+    return;
+  }
+
+  model.instances[object_id].material = material;
+  model.gpu_materials[object_id].texture_layer = material.texture_layer;
+  model.gpu_materials[object_id].tint = material.tint;
+  model.material_dirty_range.include(static_cast<size_t>(object_id));
+}
+
+InstanceMaterial ObjRenderer::getInstanceMaterial(int model_id,
+                                                  int object_id) const {
+  if (model_id < 0 || model_id >= static_cast<int>(state_->models.size())) {
+    throw std::out_of_range(
+        "Invalid model_id in ObjRenderer::getInstanceMaterial");
+  }
+  const auto &model = state_->models[model_id];
+  if (object_id < 0 || object_id >= static_cast<int>(model.instances.size())) {
+    throw std::out_of_range(
+        "Invalid object_id in ObjRenderer::getInstanceMaterial");
+  }
+  return model.instances[object_id].material;
+}
+
 RenderInstance &ObjRenderer::getInstance(int model_id, int object_id) {
   return const_cast<RenderInstance &>(
       std::as_const(*this).getInstance(model_id, object_id));
@@ -572,7 +723,7 @@ const RenderInstance &ObjRenderer::getInstance(int model_id,
     throw std::out_of_range("Invalid object_id in ObjRenderer::getInstance");
   }
 
-  return instances[object_id];
+  return instances[object_id].transform;
 }
 
 int ObjRenderer::objectCount(int model_id) const {

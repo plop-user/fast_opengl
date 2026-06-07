@@ -11,12 +11,14 @@ layout (location = 6) in vec4 iMat3;
 
 // Per-instance texture layer
 layout (location = 7) in int texIndex;
+layout (location = 8) in vec4 instanceTint;
 
 uniform mat4 view;
 uniform mat4 projection;
 
 out vec2 TexCoord;
 flat out int TexIndex;
+out vec4 Tint;
 
 void main()
 {
@@ -26,4 +28,5 @@ void main()
 
     TexCoord = aTexCoord;
     TexIndex = texIndex;
+    Tint = instanceTint;
 }

@@ -13,6 +13,11 @@ struct TransformParams {
   std::optional<glm::vec3> rotation;
 };
 
+struct InstanceMaterial {
+  int texture_layer = -1;
+  glm::vec4 tint{1.0f, 1.0f, 1.0f, 1.0f};
+};
+
 struct RenderInstance {
   glm::vec3 position{0.0f};
   glm::vec3 scale{1.0f};
@@ -36,9 +41,12 @@ public:
   bool init(const std::vector<std::string> &obj_paths,
             const std::vector<std::string> &texture_paths);
   void shutdown();
+  void clearScene();
 
   int addModelInstance(int model_id, glm::vec3 position, glm::vec3 scale,
                        int texture_layer);
+  int addModelInstance(int model_id, glm::vec3 position, glm::vec3 scale,
+                       const InstanceMaterial &material);
 
   void draw(const glm::mat4 &view, const glm::mat4 &projection) const;
   void updateInstanceMatrices();
@@ -49,6 +57,10 @@ public:
   glm::vec3 translateInstance(int model_id, int object_id, glm::vec3 delta);
   glm::vec3 scaleInstance(int model_id, int object_id, glm::vec3 delta);
   glm::vec3 rotateInstance(int model_id, int object_id, glm::vec3 delta);
+
+  void setInstanceMaterial(int model_id, int object_id,
+                           const InstanceMaterial &material);
+  InstanceMaterial getInstanceMaterial(int model_id, int object_id) const;
 
   RenderInstance &getInstance(int model_id, int object_id);
   const RenderInstance &getInstance(int model_id, int object_id) const;

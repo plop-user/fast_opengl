@@ -108,6 +108,34 @@ Parameters:
 - `scale`: object scale
 - `texture_layer`: which texture layer from the texture array to sample
 
+That overload is the short form. It creates a material with:
+
+- `texture_layer = your value`
+- white tint `vec4(1, 1, 1, 1)`
+
+If you want explicit material control, use the material overload:
+
+```cpp
+InstanceMaterial material;
+material.texture_layer = 0;
+material.tint = glm::vec4{1.0f, 0.7f, 0.7f, 1.0f};
+
+int object_id = renderer.addModelInstance(
+    0,
+    glm::vec3{0.0f, 0.0f, 0.0f},
+    glm::vec3{1.0f, 1.0f, 1.0f},
+    material
+);
+```
+
+If you want a solid-color object without texture sampling, set `texture_layer` to `-1`:
+
+```cpp
+InstanceMaterial material;
+material.texture_layer = -1;
+material.tint = glm::vec4{0.2f, 0.8f, 1.0f, 1.0f};
+```
+
 Return value:
 
 - non-negative value: valid `object_id`
@@ -164,7 +192,7 @@ SDL_GL_SwapWindow(window);
 What each step does:
 
 - `updateInstanceMatrices()`: rebuilds model matrices for dirty objects
-- `uploadInstanceData()`: uploads those matrices and texture-layer indices
+- `uploadInstanceData()`: uploads changed matrices and material data
 - `draw(view, projection)`: draws all model instances
 
 ## Transforming Objects
@@ -215,6 +243,46 @@ glm::vec3 current_position = instance.position;
 
 Use this when another system, such as physics, needs the current render transform.
 
+## Per-Instance Materials
+
+Each scene instance now has material data as well as transform data.
+
+Current material fields:
+
+- `texture_layer`
+- `tint`
+
+### Update an object's material
+
+```cpp
+InstanceMaterial material = renderer.getInstanceMaterial(0, object_id);
+material.tint = glm::vec4{1.0f, 0.4f, 0.4f, 1.0f};
+renderer.setInstanceMaterial(0, object_id, material);
+```
+
+### Make a textured object brighter or tinted
+
+```cpp
+InstanceMaterial material;
+material.texture_layer = 0;
+material.tint = glm::vec4{1.0f, 1.0f, 0.8f, 1.0f};
+renderer.setInstanceMaterial(0, object_id, material);
+```
+
+### Make an untextured flat-color object
+
+```cpp
+InstanceMaterial material;
+material.texture_layer = -1;
+material.tint = glm::vec4{0.0f, 0.8f, 0.4f, 1.0f};
+renderer.setInstanceMaterial(0, object_id, material);
+```
+
+The shader behavior is:
+
+- `texture_layer >= 0`: sample texture array and multiply by `tint`
+- `texture_layer < 0`: draw only `tint`
+
 ## Working With Multiple Models And Textures
 
 You can load more than one model and more than one texture:
@@ -249,6 +317,33 @@ This means:
 
 - `sun` uses model `assets/check.obj` with texture layer `0`
 - `earth` uses model `assets/earth.obj` with texture layer `1`
+
+## Clearing The Current Scene
+
+If you want to remove the currently spawned objects but keep the renderer, loaded meshes, and textures alive, use:
+
+```cpp
+renderer.clearScene();
+```
+
+What `clearScene()` does:
+
+- removes all current instances
+- clears CPU-side instance storage
+- releases the current per-instance GPU buffer storage
+- keeps the loaded model assets and texture array
+
+Typical use:
+
+```cpp
+renderer.clearScene();
+
+renderer.addModelInstance(0, glm::vec3{0, 0, 0}, glm::vec3{1, 1, 1}, 0);
+renderer.addModelInstance(1, glm::vec3{5, 0, 0}, glm::vec3{2, 2, 2}, 1);
+renderer.uploadInstanceData();
+```
+
+If you want to replace everything, including loaded meshes and textures, call `init(...)` again with a new asset list. `init(...)` already performs a full renderer reset before loading the new scene assets.
 
 ## Using The Physics Layer
 
@@ -299,6 +394,11 @@ renderer.updateInstanceMatrices();
 renderer.uploadInstanceData();
 renderer.draw(view, projection);
 ```
+
+Note:
+
+- `clearScene()` removes render instances only
+- if you are also using physics, you need to clear or rebuild your physics bodies separately before reusing old `object_id` values
 
 ## Minimal Example
 
@@ -366,6 +466,7 @@ SDL_GL_SwapWindow(window);
 - Passing an invalid `model_id` to `addModelInstance(...)`.
 - Assuming textures are separate OpenGL textures per object. They are layers in one texture array.
 - Mixing up model index and object instance index.
+- Calling `clearScene()` and then reusing stale physics body links or old `object_id` values.
 
 ## Where To Look Next
 
