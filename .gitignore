@@ -1,5 +1,8 @@
 .clangd
 build/
+AGENTS.md
+.vscode
 .codex
+.codex_session
 game
 compile_flags.txt

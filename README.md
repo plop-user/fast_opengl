@@ -318,6 +318,25 @@ This means:
 - `sun` uses model `assets/check.obj` with texture layer `0`
 - `earth` uses model `assets/earth.obj` with texture layer `1`
 
+## Adding A Skybox
+
+### To add a skybox with 6 png files
+
+```cpp
+initskybox({
+		"assets/+X",
+		"assets/-X",
+		"assets/+Y",
+		"assets/-Y",
+		"assets/+Z",
+		"assets/-Z",
+	});
+```
+Then in rendering loop add:
+```cpp
+    drawskybox(view, projection);
+```
+
 ## Clearing The Current Scene
 
 If you want to remove the currently spawned objects but keep the renderer, loaded meshes, and textures alive, use:

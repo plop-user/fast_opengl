@@ -13,6 +13,7 @@
 #include <grid.h>
 #include <obj.h>
 #include <phy.h>
+#include <skybox.h>
 
 #include <print>
 
@@ -39,7 +40,7 @@ int main()
 		printf("Failed to init GLAD\n");
 		return -1;
 	}
-	SDL_GL_SetSwapInterval(1);
+	SDL_GL_SetSwapInterval(0);
 	glEnable(GL_MULTISAMPLE);
 
 	printf("OpenGL version: %s\n", glGetString(GL_VERSION));
@@ -77,7 +78,16 @@ int main()
 		return -1;
 	}
 
-	const double a = 15.0;
+	initskybox({
+		"assets/sky_82_2k/pz.png",
+		"assets/sky_82_2k/nz.png",
+		"assets/sky_82_2k/py.png",
+		"assets/sky_82_2k/ny.png",
+		"assets/sky_82_2k/nx.png",
+		"assets/sky_82_2k/px.png",
+	});
+
+	/* const double a = 15.0;
 	double R = a/std::sqrt(3.0f);
 	const double G = 1.0;
 	const double mass = 100;
@@ -96,7 +106,7 @@ size_t phy3 = addDynamicBody(0, o3, mass, glm::dvec3(renderer.getInstance(0,o3).
 	getphydata(phy1).velocity = glm::dvec3({0, v, 0});
 	getphydata(phy2).velocity = glm::dvec3({-v * std::sqrt(3.0f)/2.0f, -v * 0.5f, 0.0f });
 	getphydata(phy3).velocity = glm::dvec3({v * std::sqrt(3.0f)/2.0f, -v * 0.5f, 0.0f});
-
+ */
 
 	Uint64 NOW = SDL_GetPerformanceCounter();
 	Uint64 LAST = 0;
@@ -194,6 +204,7 @@ size_t phy3 = addDynamicBody(0, o3, mass, glm::dvec3(renderer.getInstance(0,o3).
 		renderer.uploadInstanceData();
 		renderer.draw(view, projection);
 		griddraw(view, projection);
+		drawskybox(view, projection);
 
 	
 		SDL_GL_SwapWindow(window);
