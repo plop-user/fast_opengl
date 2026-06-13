@@ -74,9 +74,9 @@ int main()
 
 	SDL_SetRelativeMouseMode(SDL_TRUE);
 
-	if (!renderer.init({"assets/check.obj"}, {"assets/map/8k_sun.png"})) {
-		return -1;
-	}
+	renderer.init();
+	renderer.loadMesh("assets/check.obj");
+	renderer.loadTexture("assets/map/8k_sun.png");
 
 	initskybox({
 		"assets/sky_82_2k/pz.png",

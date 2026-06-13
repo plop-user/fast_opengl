@@ -14,6 +14,9 @@ struct TransformParams {
 };
 
 struct InstanceMaterial {
+  // `-1` means "use the mesh part's default material texture/color".
+  // Any non-negative value overrides all mesh-part diffuse textures on the
+  // instance with a texture loaded through `loadTexture()`.
   int texture_layer = -1;
   glm::vec4 tint{1.0f, 1.0f, 1.0f, 1.0f};
 };
@@ -38,11 +41,18 @@ public:
   ObjRenderer(ObjRenderer &&) noexcept;
   ObjRenderer &operator=(ObjRenderer &&) noexcept;
 
-  bool init(const std::vector<std::string> &obj_paths,
-            const std::vector<std::string> &texture_paths);
+  bool init();
+  // Loads OBJ geometry. If the OBJ references an MTL, diffuse textures
+  // declared with `map_Kd` are loaded automatically relative to the OBJ path.
+  int loadMesh(const std::string &path);
+  // Loads a standalone texture and returns an override texture id that can be
+  // assigned to an instance through InstanceMaterial::texture_layer.
+  int loadTexture(const std::string &path);
   void shutdown();
   void clearScene();
 
+  // Passing `texture_layer = -1` keeps the mesh's own MTL-driven textures.
+  // Passing a non-negative id forces that texture on the whole instance.
   int addModelInstance(int model_id, glm::vec3 position, glm::vec3 scale,
                        int texture_layer);
   int addModelInstance(int model_id, glm::vec3 position, glm::vec3 scale,
@@ -50,6 +60,8 @@ public:
 
   void draw(const glm::mat4 &view, const glm::mat4 &projection) const;
   void updateInstanceMatrices();
+  // Retained for call-site compatibility. Instance data is now consumed
+  // directly during draw, so this function is currently a no-op.
   void uploadInstanceData();
 
   void transformInstance(int model_id, int object_id,

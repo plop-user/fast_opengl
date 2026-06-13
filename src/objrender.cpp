@@ -4,17 +4,22 @@
 #include <glad/glad.h>
 #include <glslread.h>
 
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
-
+#include <algorithm>
 #include <cstddef>
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
+#include <vector>
+
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
+
+namespace fs = std::filesystem;
 
 namespace {
 
@@ -90,48 +95,83 @@ GLuint linkProgram(GLuint vertex_shader, GLuint fragment_shader) {
   throw std::runtime_error("Program link failed: " + log);
 }
 
+std::string normalizeTextureReference(std::string value) {
+  std::replace(value.begin(), value.end(), '\\', '/');
+  return value;
+}
+
+std::string normalizePathString(const fs::path &path) {
+  fs::path normalized = path.lexically_normal();
+  if (normalized.is_relative()) {
+    normalized = fs::absolute(normalized);
+  }
+  return normalized.string();
+}
+
+void ensureImageFormats() {
+  const int wanted = IMG_INIT_PNG | IMG_INIT_JPG;
+  const int initialized = IMG_Init(wanted);
+  if ((initialized & wanted) != wanted) {
+    throw std::runtime_error(std::string("SDL_image failed to initialize: ") +
+                             IMG_GetError());
+  }
+}
+
+GLuint loadTexture2D(const std::string &path) {
+  ensureImageFormats();
+
+  SDL_Surface *surface = IMG_Load(path.c_str());
+  if (!surface) {
+    throw std::runtime_error("Failed to load texture " + path + ": " +
+                             IMG_GetError());
+  }
+
+  SDL_Surface *formatted =
+      SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
+  SDL_FreeSurface(surface);
+  if (!formatted) {
+    throw std::runtime_error("Failed to convert texture " + path +
+                             " to RGBA32.");
+  }
+
+  GLuint texture_id = 0;
+  glGenTextures(1, &texture_id);
+  glBindTexture(GL_TEXTURE_2D, texture_id);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                  GL_LINEAR_MIPMAP_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, formatted->w, formatted->h, 0,
+               GL_RGBA, GL_UNSIGNED_BYTE, formatted->pixels);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  SDL_FreeSurface(formatted);
+  return texture_id;
+}
+
+struct PartBuilder {
+  int material_id = -1;
+  std::vector<Vertex> unique_vertices;
+  std::vector<unsigned int> indices;
+  std::unordered_map<Vertex, unsigned int, VertexHash> vertex_map;
+};
+
 } // namespace
 
 struct ObjRenderer::RendererState {
-  struct DirtyRange {
-    bool active = false;
-    size_t first = 0;
-    size_t last = 0;
-
-    void include(size_t index) {
-      if (!active) {
-        active = true;
-        first = index;
-        last = index;
-        return;
-      }
-      if (index < first) {
-        first = index;
-      }
-      if (index > last) {
-        last = index;
-      }
-    }
-
-    void reset() {
-      active = false;
-      first = 0;
-      last = 0;
-    }
-  };
-
-  struct MeshAsset {
+  struct MeshPart {
     GLuint vao = 0;
     GLuint vbo = 0;
     GLuint ebo = 0;
     GLsizei index_count = 0;
+    int default_texture_id = -1;
+    glm::vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
   };
 
-  struct InstanceBuffers {
-    GLuint matrix_vbo = 0;
-    GLuint material_vbo = 0;
-    size_t matrix_capacity_bytes = 0;
-    size_t material_capacity_bytes = 0;
+  struct MeshAsset {
+    std::vector<MeshPart> parts;
   };
 
   struct SceneInstance {
@@ -139,27 +179,24 @@ struct ObjRenderer::RendererState {
     InstanceMaterial material;
   };
 
-  struct GpuInstanceMaterial {
-    int texture_layer = -1;
-    glm::vec4 tint{1.0f, 1.0f, 1.0f, 1.0f};
-  };
-
   struct SceneModel {
     MeshAsset mesh;
-    InstanceBuffers buffers;
     std::vector<SceneInstance> instances;
     std::vector<glm::mat4> matrices;
-    std::vector<GpuInstanceMaterial> gpu_materials;
-    DirtyRange matrix_dirty_range;
-    DirtyRange material_dirty_range;
   };
 
   GLuint shader_program = 0;
-  GLuint texture_array_id = 0;
+  GLint model_location = -1;
   GLint view_location = -1;
   GLint projection_location = -1;
-  GLint texture_array_location = -1;
+  GLint texture_location = -1;
+  GLint use_texture_location = -1;
+  GLint base_color_location = -1;
+  GLint instance_tint_location = -1;
   std::vector<SceneModel> models;
+  std::vector<GLuint> texture_ids;
+  std::vector<std::string> texture_paths;
+  std::unordered_map<std::string, int> texture_lookup;
 };
 
 ObjRenderer::ObjRenderer() : state_(std::make_unique<RendererState>()) {}
@@ -188,50 +225,31 @@ ObjRenderer &ObjRenderer::operator=(ObjRenderer &&other) noexcept {
 
 namespace {
 
-ObjRenderer::RendererState::MeshAsset loadMeshAsset(const std::string &path) {
-  tinyobj::attrib_t attrib;
-  std::vector<tinyobj::shape_t> shapes;
-  std::vector<tinyobj::material_t> materials;
-  std::string warn;
-  std::string err;
-
-  const bool ok =
-      tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, path.c_str());
-  if (!warn.empty()) {
-    std::cerr << "OBJ warning for " << path << ": " << warn << '\n';
-  }
-  if (!ok) {
-    throw std::runtime_error("Failed to load OBJ " + path + ": " + err);
+int getOrLoadTexture(ObjRenderer::RendererState &state, const fs::path &path) {
+  const std::string normalized_path = normalizePathString(path);
+  const auto found = state.texture_lookup.find(normalized_path);
+  if (found != state.texture_lookup.end()) {
+    return found->second;
   }
 
-  std::vector<Vertex> unique_vertices;
-  std::vector<unsigned int> indices;
-  std::unordered_map<Vertex, unsigned int, VertexHash> vertex_map;
+  const GLuint texture_id = loadTexture2D(normalized_path);
+  const int texture_index = static_cast<int>(state.texture_ids.size());
+  state.texture_ids.push_back(texture_id);
+  state.texture_paths.push_back(normalized_path);
+  state.texture_lookup.emplace(normalized_path, texture_index);
+  return texture_index;
+}
 
-  for (const auto &shape : shapes) {
-    for (const auto &idx : shape.mesh.indices) {
-      Vertex vertex{};
-      vertex.pos = {attrib.vertices[3 * idx.vertex_index + 0],
-                    attrib.vertices[3 * idx.vertex_index + 1],
-                    attrib.vertices[3 * idx.vertex_index + 2]};
-
-      if (idx.texcoord_index >= 0) {
-        vertex.uv = {attrib.texcoords[2 * idx.texcoord_index + 0],
-                     1.0f - attrib.texcoords[2 * idx.texcoord_index + 1]};
-      }
-
-      const auto [it, inserted] = vertex_map.emplace(
-          vertex, static_cast<unsigned int>(unique_vertices.size()));
-      if (inserted) {
-        unique_vertices.push_back(vertex);
-      }
-      indices.push_back(it->second);
-    }
+ObjRenderer::RendererState::MeshPart createMeshPart(
+    const PartBuilder &builder, int default_texture_id,
+    const glm::vec4 &base_color) {
+  if (builder.indices.empty()) {
+    throw std::runtime_error("Cannot create mesh part without indices.");
   }
 
   std::vector<float> vertices;
-  vertices.reserve(unique_vertices.size() * 5);
-  for (const auto &vertex : unique_vertices) {
+  vertices.reserve(builder.unique_vertices.size() * 5);
+  for (const auto &vertex : builder.unique_vertices) {
     vertices.push_back(vertex.pos.x);
     vertices.push_back(vertex.pos.y);
     vertices.push_back(vertex.pos.z);
@@ -239,187 +257,232 @@ ObjRenderer::RendererState::MeshAsset loadMeshAsset(const std::string &path) {
     vertices.push_back(vertex.uv.y);
   }
 
+  ObjRenderer::RendererState::MeshPart part{};
+  part.index_count = static_cast<GLsizei>(builder.indices.size());
+  part.default_texture_id = default_texture_id;
+  part.base_color = base_color;
+
+  try {
+    glGenVertexArrays(1, &part.vao);
+    glGenBuffers(1, &part.vbo);
+    glGenBuffers(1, &part.ebo);
+
+    glBindVertexArray(part.vao);
+
+    glBindBuffer(GL_ARRAY_BUFFER, part.vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float),
+                 vertices.data(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, part.ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                 builder.indices.size() * sizeof(unsigned int),
+                 builder.indices.data(), GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
+                          (void *)0);
+
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
+                          (void *)(3 * sizeof(float)));
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+    return part;
+  } catch (...) {
+    if (part.ebo != 0) {
+      glDeleteBuffers(1, &part.ebo);
+    }
+    if (part.vbo != 0) {
+      glDeleteBuffers(1, &part.vbo);
+    }
+    if (part.vao != 0) {
+      glDeleteVertexArrays(1, &part.vao);
+    }
+    throw;
+  }
+}
+
+ObjRenderer::RendererState::MeshAsset loadMeshAsset(
+    ObjRenderer::RendererState &state, const std::string &path) {
+  tinyobj::attrib_t attrib;
+  std::vector<tinyobj::shape_t> shapes;
+  std::vector<tinyobj::material_t> materials;
+  std::string warn;
+  std::string err;
+
+  const fs::path obj_path(path);
+  const fs::path obj_dir =
+      obj_path.has_parent_path() ? obj_path.parent_path() : fs::path(".");
+
+  const std::string obj_path_string = obj_path.string();
+  const std::string obj_dir_string = obj_dir.string();
+  const bool ok =
+      tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
+                       obj_path_string.c_str(), obj_dir_string.c_str());
+  if (!warn.empty()) {
+    std::cerr << "OBJ warning for " << path << ": " << warn << '\n';
+  }
+  if (!ok) {
+    throw std::runtime_error("Failed to load OBJ " + path + ": " + err);
+  }
+
+  struct MaterialInfo {
+    int texture_id = -1;
+    glm::vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
+  };
+
+  std::vector<MaterialInfo> material_infos(materials.size());
+  for (size_t i = 0; i < materials.size(); ++i) {
+    const auto &material = materials[i];
+    MaterialInfo info;
+    info.base_color = {material.diffuse[0], material.diffuse[1],
+                       material.diffuse[2], material.dissolve};
+
+    if (!material.diffuse_texname.empty()) {
+      const fs::path texture_path =
+          obj_dir / normalizeTextureReference(material.diffuse_texname);
+      try {
+        info.texture_id = getOrLoadTexture(state, texture_path);
+        info.base_color = {1.0f, 1.0f, 1.0f, material.dissolve};
+      } catch (const std::exception &ex) {
+        std::cerr << "Failed to load diffuse texture for material '"
+                  << material.name << "' in " << path << ": " << ex.what()
+                  << '\n';
+      }
+    }
+
+    material_infos[i] = info;
+  }
+
+  std::vector<PartBuilder> builders;
+  std::unordered_map<int, size_t> builder_indices;
+
+  auto &fallback_builder = builders.emplace_back();
+  fallback_builder.material_id = -1;
+  builder_indices.emplace(-1, 0);
+
+  auto getBuilder = [&](int material_id) -> PartBuilder & {
+    const auto found = builder_indices.find(material_id);
+    if (found != builder_indices.end()) {
+      return builders[found->second];
+    }
+
+    const size_t new_index = builders.size();
+    builder_indices.emplace(material_id, new_index);
+    auto &builder = builders.emplace_back();
+    builder.material_id = material_id;
+    return builder;
+  };
+
+  for (const auto &shape : shapes) {
+    size_t index_offset = 0;
+    for (size_t face = 0; face < shape.mesh.num_face_vertices.size(); ++face) {
+      const int face_vertex_count = shape.mesh.num_face_vertices[face];
+      int material_id = -1;
+      if (face < shape.mesh.material_ids.size()) {
+        material_id = shape.mesh.material_ids[face];
+      }
+
+      auto &builder = getBuilder(material_id);
+      for (int v = 0; v < face_vertex_count; ++v) {
+        const tinyobj::index_t idx = shape.mesh.indices[index_offset + v];
+        if (idx.vertex_index < 0) {
+          continue;
+        }
+
+        Vertex vertex{};
+        vertex.pos = {attrib.vertices[3 * idx.vertex_index + 0],
+                      attrib.vertices[3 * idx.vertex_index + 1],
+                      attrib.vertices[3 * idx.vertex_index + 2]};
+
+        if (idx.texcoord_index >= 0 &&
+            2 * idx.texcoord_index + 1 <
+                static_cast<int>(attrib.texcoords.size())) {
+          vertex.uv = {attrib.texcoords[2 * idx.texcoord_index + 0],
+                       1.0f - attrib.texcoords[2 * idx.texcoord_index + 1]};
+        }
+
+        const auto [it, inserted] = builder.vertex_map.emplace(
+            vertex, static_cast<unsigned int>(builder.unique_vertices.size()));
+        if (inserted) {
+          builder.unique_vertices.push_back(vertex);
+        }
+        builder.indices.push_back(it->second);
+      }
+
+      index_offset += static_cast<size_t>(face_vertex_count);
+    }
+  }
+
   ObjRenderer::RendererState::MeshAsset mesh{};
-  mesh.index_count = static_cast<GLsizei>(indices.size());
+  try {
+    for (const auto &builder : builders) {
+      if (builder.indices.empty()) {
+        continue;
+      }
 
-  glGenVertexArrays(1, &mesh.vao);
-  glGenBuffers(1, &mesh.vbo);
-  glGenBuffers(1, &mesh.ebo);
+      int default_texture_id = -1;
+      glm::vec4 base_color{1.0f, 1.0f, 1.0f, 1.0f};
+      if (builder.material_id >= 0 &&
+          builder.material_id < static_cast<int>(material_infos.size())) {
+        default_texture_id = material_infos[builder.material_id].texture_id;
+        base_color = material_infos[builder.material_id].base_color;
+      }
 
-  glBindVertexArray(mesh.vao);
+      mesh.parts.push_back(
+          createMeshPart(builder, default_texture_id, base_color));
+    }
+  } catch (...) {
+    for (auto &part : mesh.parts) {
+      if (part.ebo != 0) {
+        glDeleteBuffers(1, &part.ebo);
+      }
+      if (part.vbo != 0) {
+        glDeleteBuffers(1, &part.vbo);
+      }
+      if (part.vao != 0) {
+        glDeleteVertexArrays(1, &part.vao);
+      }
+    }
+    throw;
+  }
 
-  glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
-  glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(),
-               GL_STATIC_DRAW);
-
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ebo);
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int),
-               indices.data(), GL_STATIC_DRAW);
-
-  glEnableVertexAttribArray(0);
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
-                        (void *)0);
-
-  glEnableVertexAttribArray(2);
-  glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
-                        (void *)(3 * sizeof(float)));
-
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
-  glBindVertexArray(0);
+  if (mesh.parts.empty()) {
+    throw std::runtime_error("OBJ contained no renderable geometry: " + path);
+  }
 
   return mesh;
 }
 
-ObjRenderer::RendererState::InstanceBuffers createInstanceBuffers(GLuint vao) {
-  ObjRenderer::RendererState::InstanceBuffers buffers{};
-  glGenBuffers(1, &buffers.matrix_vbo);
-  glGenBuffers(1, &buffers.material_vbo);
-
-  glBindVertexArray(vao);
-
-  glBindBuffer(GL_ARRAY_BUFFER, buffers.matrix_vbo);
-  const GLsizei vec4_size = sizeof(glm::vec4);
-  for (GLuint i = 0; i < 4; ++i) {
-    glEnableVertexAttribArray(3 + i);
-    glVertexAttribPointer(3 + i, 4, GL_FLOAT, GL_FALSE, 4 * vec4_size,
-                          (void *)(static_cast<uintptr_t>(i) * vec4_size));
-    glVertexAttribDivisor(3 + i, 1);
+void destroyMeshPart(ObjRenderer::RendererState::MeshPart &part) {
+  if (part.ebo != 0) {
+    glDeleteBuffers(1, &part.ebo);
   }
-
-  glBindBuffer(GL_ARRAY_BUFFER, buffers.material_vbo);
-  glEnableVertexAttribArray(7);
-  glVertexAttribIPointer(
-      7, 1, GL_INT,
-      sizeof(ObjRenderer::RendererState::GpuInstanceMaterial),
-      (void *)offsetof(ObjRenderer::RendererState::GpuInstanceMaterial,
-                       texture_layer));
-  glVertexAttribDivisor(7, 1);
-
-  glEnableVertexAttribArray(8);
-  glVertexAttribPointer(
-      8, 4, GL_FLOAT, GL_FALSE,
-      sizeof(ObjRenderer::RendererState::GpuInstanceMaterial),
-      (void *)offsetof(ObjRenderer::RendererState::GpuInstanceMaterial, tint));
-  glVertexAttribDivisor(8, 1);
-
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
-  glBindVertexArray(0);
-
-  return buffers;
-}
-
-GLuint createTextureArray(const std::vector<std::string> &paths) {
-  if (paths.empty()) {
-    throw std::runtime_error(
-        "Texture array initialization requires at least one texture.");
+  if (part.vbo != 0) {
+    glDeleteBuffers(1, &part.vbo);
   }
-
-  if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) {
-    throw std::runtime_error(std::string("SDL_image failed to initialize: ") +
-                             IMG_GetError());
+  if (part.vao != 0) {
+    glDeleteVertexArrays(1, &part.vao);
   }
-
-  SDL_Surface *first = IMG_Load(paths.front().c_str());
-  if (!first) {
-    throw std::runtime_error("Failed to load texture " + paths.front() + ": " +
-                             IMG_GetError());
-  }
-
-  const int width = first->w;
-  const int height = first->h;
-  SDL_FreeSurface(first);
-
-  GLuint texture_array_id = 0;
-  glGenTextures(1, &texture_array_id);
-  glBindTexture(GL_TEXTURE_2D_ARRAY, texture_array_id);
-  glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, width, height,
-               static_cast<GLsizei>(paths.size()), 0, GL_RGBA,
-               GL_UNSIGNED_BYTE, nullptr);
-
-  for (int layer = 0; layer < static_cast<int>(paths.size()); ++layer) {
-    SDL_Surface *surface = IMG_Load(paths[layer].c_str());
-    if (!surface) {
-      glDeleteTextures(1, &texture_array_id);
-      throw std::runtime_error("Failed to load texture " + paths[layer] + ": " +
-                               IMG_GetError());
-    }
-
-    if (surface->w != width || surface->h != height) {
-      SDL_FreeSurface(surface);
-      glDeleteTextures(1, &texture_array_id);
-      throw std::runtime_error(
-          "Texture dimensions must match for texture array: " + paths[layer]);
-    }
-
-    SDL_Surface *formatted =
-        SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
-    SDL_FreeSurface(surface);
-    if (!formatted) {
-      glDeleteTextures(1, &texture_array_id);
-      throw std::runtime_error("Failed to convert texture " + paths[layer] +
-                               " to RGBA32.");
-    }
-
-    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, width, height, 1,
-                    GL_RGBA, GL_UNSIGNED_BYTE, formatted->pixels);
-    SDL_FreeSurface(formatted);
-  }
-
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER,
-                  GL_NEAREST_MIPMAP_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
-  glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
-  glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
-
-  return texture_array_id;
-}
-
-void destroyInstanceBuffers(ObjRenderer::RendererState::InstanceBuffers &buffers) {
-  if (buffers.material_vbo != 0) {
-    glDeleteBuffers(1, &buffers.material_vbo);
-  }
-  if (buffers.matrix_vbo != 0) {
-    glDeleteBuffers(1, &buffers.matrix_vbo);
-  }
-  buffers = {};
+  part = {};
 }
 
 void destroyMeshAsset(ObjRenderer::RendererState::MeshAsset &mesh) {
-  if (mesh.ebo != 0) {
-    glDeleteBuffers(1, &mesh.ebo);
+  for (auto &part : mesh.parts) {
+    destroyMeshPart(part);
   }
-  if (mesh.vbo != 0) {
-    glDeleteBuffers(1, &mesh.vbo);
-  }
-  if (mesh.vao != 0) {
-    glDeleteVertexArrays(1, &mesh.vao);
-  }
-  mesh = {};
+  mesh.parts.clear();
 }
 
 void releaseSceneModelInstanceStorage(ObjRenderer::RendererState::SceneModel &model) {
   model.instances.clear();
   model.matrices.clear();
-  model.gpu_materials.clear();
-  model.matrix_dirty_range.reset();
-  model.material_dirty_range.reset();
-
-  glBindBuffer(GL_ARRAY_BUFFER, model.buffers.matrix_vbo);
-  glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
-  glBindBuffer(GL_ARRAY_BUFFER, model.buffers.material_vbo);
-  glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-  model.buffers.matrix_capacity_bytes = 0;
-  model.buffers.material_capacity_bytes = 0;
 }
 
 } // namespace
 
-bool ObjRenderer::init(const std::vector<std::string> &obj_paths,
-                       const std::vector<std::string> &texture_paths) {
+bool ObjRenderer::init() {
   shutdown();
 
   try {
@@ -432,27 +495,45 @@ bool ObjRenderer::init(const std::vector<std::string> &obj_paths,
     glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
 
-    state_->view_location =
-        glGetUniformLocation(state_->shader_program, "view");
+    state_->model_location = glGetUniformLocation(state_->shader_program, "model");
+    state_->view_location = glGetUniformLocation(state_->shader_program, "view");
     state_->projection_location =
         glGetUniformLocation(state_->shader_program, "projection");
-    state_->texture_array_location =
-        glGetUniformLocation(state_->shader_program, "textureArray");
+    state_->texture_location =
+        glGetUniformLocation(state_->shader_program, "diffuseTexture");
+    state_->use_texture_location =
+        glGetUniformLocation(state_->shader_program, "useTexture");
+    state_->base_color_location =
+        glGetUniformLocation(state_->shader_program, "baseColor");
+    state_->instance_tint_location =
+        glGetUniformLocation(state_->shader_program, "instanceTint");
 
-    state_->models.reserve(obj_paths.size());
-    for (const auto &path : obj_paths) {
-      RendererState::SceneModel scene_model{};
-      scene_model.mesh = loadMeshAsset(path);
-      scene_model.buffers = createInstanceBuffers(scene_model.mesh.vao);
-      state_->models.push_back(std::move(scene_model));
-    }
-
-    state_->texture_array_id = createTextureArray(texture_paths);
     return true;
   } catch (const std::exception &ex) {
     std::cerr << "ObjRenderer init failed: " << ex.what() << '\n';
     shutdown();
     return false;
+  }
+}
+
+int ObjRenderer::loadMesh(const std::string &path) {
+  try {
+    RendererState::SceneModel scene_model{};
+    scene_model.mesh = loadMeshAsset(*state_, path);
+    state_->models.push_back(std::move(scene_model));
+    return static_cast<int>(state_->models.size()) - 1;
+  } catch (const std::exception &ex) {
+    std::cerr << "loadMesh failed for " << path << ": " << ex.what() << '\n';
+    return -1;
+  }
+}
+
+int ObjRenderer::loadTexture(const std::string &path) {
+  try {
+    return getOrLoadTexture(*state_, fs::path(path));
+  } catch (const std::exception &ex) {
+    std::cerr << "loadTexture failed for " << path << ": " << ex.what() << '\n';
+    return -1;
   }
 }
 
@@ -464,24 +545,31 @@ void ObjRenderer::shutdown() {
 
   for (auto &model : state_->models) {
     releaseSceneModelInstanceStorage(model);
-    destroyInstanceBuffers(model.buffers);
     destroyMeshAsset(model.mesh);
   }
   state_->models.clear();
 
-  if (state_->texture_array_id != 0) {
-    glDeleteTextures(1, &state_->texture_array_id);
-    state_->texture_array_id = 0;
+  for (GLuint texture_id : state_->texture_ids) {
+    if (texture_id != 0) {
+      glDeleteTextures(1, &texture_id);
+    }
   }
+  state_->texture_ids.clear();
+  state_->texture_paths.clear();
+  state_->texture_lookup.clear();
 
   if (state_->shader_program != 0) {
     glDeleteProgram(state_->shader_program);
     state_->shader_program = 0;
   }
 
+  state_->model_location = -1;
   state_->view_location = -1;
   state_->projection_location = -1;
-  state_->texture_array_location = -1;
+  state_->texture_location = -1;
+  state_->use_texture_location = -1;
+  state_->base_color_location = -1;
+  state_->instance_tint_location = -1;
 }
 
 void ObjRenderer::clearScene() {
@@ -510,21 +598,15 @@ int ObjRenderer::addModelInstance(int model_id, glm::vec3 position,
   RendererState::SceneInstance scene_instance;
   scene_instance.transform.position = position;
   scene_instance.transform.scale = scale;
+  scene_instance.transform.dirty = false;
   scene_instance.material = material;
 
   glm::mat4 matrix(1.0f);
   matrix = glm::translate(matrix, position);
   matrix = glm::scale(matrix, scale);
 
-  RendererState::GpuInstanceMaterial gpu_material;
-  gpu_material.texture_layer = material.texture_layer;
-  gpu_material.tint = material.tint;
-
   model.instances.push_back(scene_instance);
   model.matrices.push_back(matrix);
-  model.gpu_materials.push_back(gpu_material);
-  model.matrix_dirty_range.include(index);
-  model.material_dirty_range.include(index);
   return static_cast<int>(index);
 }
 
@@ -538,22 +620,44 @@ void ObjRenderer::draw(const glm::mat4 &view,
   glUniformMatrix4fv(state_->view_location, 1, GL_FALSE, glm::value_ptr(view));
   glUniformMatrix4fv(state_->projection_location, 1, GL_FALSE,
                      glm::value_ptr(projection));
-
-  glUniform1i(state_->texture_array_location, 0);
+  glUniform1i(state_->texture_location, 0);
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D_ARRAY, state_->texture_array_id);
 
   for (const auto &model : state_->models) {
     if (model.instances.empty()) {
       continue;
     }
 
-    glBindVertexArray(model.mesh.vao);
-    glDrawElementsInstanced(GL_TRIANGLES, model.mesh.index_count,
-                            GL_UNSIGNED_INT, nullptr,
-                            static_cast<GLsizei>(model.instances.size()));
+    for (const auto &part : model.mesh.parts) {
+      glBindVertexArray(part.vao);
+
+      for (size_t instance_index = 0; instance_index < model.instances.size();
+           ++instance_index) {
+        const auto &scene_instance = model.instances[instance_index];
+        const glm::mat4 &matrix = model.matrices[instance_index];
+        const int texture_index = scene_instance.material.texture_layer >= 0
+                                      ? scene_instance.material.texture_layer
+                                      : part.default_texture_id;
+        const bool use_texture =
+            texture_index >= 0 &&
+            texture_index < static_cast<int>(state_->texture_ids.size());
+
+        glUniformMatrix4fv(state_->model_location, 1, GL_FALSE,
+                           glm::value_ptr(matrix));
+        glUniform4fv(state_->base_color_location, 1,
+                     glm::value_ptr(part.base_color));
+        glUniform4fv(state_->instance_tint_location, 1,
+                     glm::value_ptr(scene_instance.material.tint));
+        glUniform1i(state_->use_texture_location, use_texture ? 1 : 0);
+        glBindTexture(GL_TEXTURE_2D,
+                      use_texture ? state_->texture_ids[texture_index] : 0);
+        glDrawElements(GL_TRIANGLES, part.index_count, GL_UNSIGNED_INT,
+                       nullptr);
+      }
+    }
   }
 
+  glBindTexture(GL_TEXTURE_2D, 0);
   glBindVertexArray(0);
 }
 
@@ -573,62 +677,12 @@ void ObjRenderer::updateInstanceMatrices() {
       matrix = glm::scale(matrix, instance.scale);
 
       model.matrices[i] = matrix;
-      model.matrix_dirty_range.include(i);
       instance.dirty = false;
     }
   }
 }
 
-void ObjRenderer::uploadInstanceData() {
-  for (auto &model : state_->models) {
-    if (model.instances.empty()) {
-      continue;
-    }
-
-    if (model.matrix_dirty_range.active) {
-      const size_t total_bytes = model.matrices.size() * sizeof(glm::mat4);
-      glBindBuffer(GL_ARRAY_BUFFER, model.buffers.matrix_vbo);
-      if (total_bytes > model.buffers.matrix_capacity_bytes) {
-        model.buffers.matrix_capacity_bytes = total_bytes * 2;
-        glBufferData(GL_ARRAY_BUFFER, model.buffers.matrix_capacity_bytes,
-                     nullptr, GL_DYNAMIC_DRAW);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, total_bytes, model.matrices.data());
-      } else {
-        const size_t first = model.matrix_dirty_range.first;
-        const size_t count =
-            model.matrix_dirty_range.last - model.matrix_dirty_range.first + 1;
-        glBufferSubData(GL_ARRAY_BUFFER, first * sizeof(glm::mat4),
-                        count * sizeof(glm::mat4), model.matrices.data() + first);
-      }
-      model.matrix_dirty_range.reset();
-    }
-
-    if (model.material_dirty_range.active) {
-      const size_t total_bytes =
-          model.gpu_materials.size() *
-          sizeof(RendererState::GpuInstanceMaterial);
-      glBindBuffer(GL_ARRAY_BUFFER, model.buffers.material_vbo);
-      if (total_bytes > model.buffers.material_capacity_bytes) {
-        model.buffers.material_capacity_bytes = total_bytes * 2;
-        glBufferData(GL_ARRAY_BUFFER, model.buffers.material_capacity_bytes,
-                     nullptr, GL_DYNAMIC_DRAW);
-        glBufferSubData(GL_ARRAY_BUFFER, 0, total_bytes,
-                        model.gpu_materials.data());
-      } else {
-        const size_t first = model.material_dirty_range.first;
-        const size_t count = model.material_dirty_range.last -
-                             model.material_dirty_range.first + 1;
-        glBufferSubData(GL_ARRAY_BUFFER,
-                        first * sizeof(RendererState::GpuInstanceMaterial),
-                        count * sizeof(RendererState::GpuInstanceMaterial),
-                        model.gpu_materials.data() + first);
-      }
-      model.material_dirty_range.reset();
-    }
-  }
-
-  glBindBuffer(GL_ARRAY_BUFFER, 0);
-}
+void ObjRenderer::uploadInstanceData() {}
 
 void ObjRenderer::transformInstance(int model_id, int object_id,
                                     const TransformParams &params) {
@@ -688,9 +742,6 @@ void ObjRenderer::setInstanceMaterial(int model_id, int object_id,
   }
 
   model.instances[object_id].material = material;
-  model.gpu_materials[object_id].texture_layer = material.texture_layer;
-  model.gpu_materials[object_id].tint = material.tint;
-  model.material_dirty_range.include(static_cast<size_t>(object_id));
 }
 
 InstanceMaterial ObjRenderer::getInstanceMaterial(int model_id,

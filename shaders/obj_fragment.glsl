@@ -1,18 +1,19 @@
 #version 430 core
 
 in vec2 TexCoord;
-flat in int TexIndex;
-in vec4 Tint;
 
-uniform sampler2DArray textureArray;
+uniform sampler2D diffuseTexture;
+uniform bool useTexture;
+uniform vec4 baseColor;
+uniform vec4 instanceTint;
 
 out vec4 FragColor;
 
 void main()
 {
-	if (TexIndex < 0) {
-		FragColor = Tint;
-	} else {
-		FragColor = texture(textureArray, vec3(TexCoord, TexIndex)) * Tint;
-	}
+    vec4 color = baseColor;
+    if (useTexture) {
+        color *= texture(diffuseTexture, TexCoord);
+    }
+    FragColor = color * instanceTint;
 }

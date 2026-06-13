@@ -1,8 +1,8 @@
 # Game SDL2
 
-SDL2 + OpenGL project with a class-based OBJ renderer and a simple gravity simulation.
+SDL2 + OpenGL project with an OBJ renderer, a reference grid, a skybox, and a simple gravity simulation.
 
-For file-by-file codebase notes, see [other_info.md](/home/plop/projects/game_sdl2/other_info.md).
+For file-by-file notes, see [other_info.md](/home/plop/projects/mygame/other_info.md).
 
 ## What This Project Does
 
@@ -11,11 +11,12 @@ The current application:
 - creates an SDL2 window with an OpenGL 4.0 core context
 - loads OpenGL through GLAD
 - renders OBJ models through `ObjRenderer`
+- supports `.obj` + `.mtl` diffuse textures via `map_Kd`
 - draws a reference grid
 - runs a simple N-body gravity simulation
 - lets you move a free camera around the scene
 
-The main rendering API is `ObjRenderer` in [headers/obj.h](/home/plop/projects/game_sdl2/headers/obj.h).
+The main rendering API is `ObjRenderer` in [headers/obj.h](/home/plop/projects/mygame/headers/obj.h).
 
 ## Build And Run
 
@@ -48,7 +49,7 @@ make clean
 
 ## Renderer Usage
 
-This section is the intended usage pattern for `ObjRenderer`.
+This section describes the current `ObjRenderer` API and behavior.
 
 ### 1. Create the OpenGL context first
 
@@ -68,90 +69,102 @@ After that, you can safely construct and initialize `ObjRenderer`.
 
 ```cpp
 ObjRenderer renderer;
-
-if (!renderer.init(
-    {"assets/check.obj"},
-    {"assets/map/8k_sun.png"})) {
+if (!renderer.init()) {
   return -1;
 }
 ```
 
-Meaning:
+`init()` only compiles and links the object shaders. It does not load models or textures.
 
-- the first vector is the list of OBJ models
-- the second vector is the list of textures used to build one `GL_TEXTURE_2D_ARRAY`
+### 3. Load meshes
 
-Index rules:
+Each call to `loadMesh()` returns a `model_id`.
 
-- OBJ path index becomes `model_id`
-- texture path index becomes `texture_layer`
+```cpp
+int sphere = renderer.loadMesh("assets/check.obj");
+int ship = renderer.loadMesh(
+    "assets/4c275vutixts-PrometheusNX59650/Prometheus NX 59650/prometheus.obj");
+```
 
-If you pass two OBJ files, model `0` is the first file and model `1` is the second. The same rule applies to textures.
+Rules:
 
-### 3. Add model instances
+- `model_id` is the return value from `loadMesh()`
+- `-1` means the load failed
+- if the OBJ references an `.mtl`, the renderer loads `map_Kd` diffuse textures automatically
+- `.mtl` texture paths are resolved relative to the OBJ file
+- JPG and PNG diffuse textures are supported
+- mixed texture sizes are supported
+
+For a multi-material asset like `prometheus.obj`, this is enough to pull in the color textures referenced by `prometheus.mtl`.
+
+### 4. Optional: load standalone override textures
+
+You can still load a texture manually and use it as a whole-instance override.
+
+```cpp
+int sun_tex = renderer.loadTexture("assets/map/8k_sun.png");
+```
+
+The returned value is a texture override id that can be assigned through `InstanceMaterial::texture_layer`.
+
+### 5. Add model instances
 
 Use `addModelInstance(...)` to spawn visible objects in the scene.
 
+#### Case A: use the mesh's own `.mtl` textures
+
+This is the normal case for textured assets such as `prometheus.obj`.
+
 ```cpp
-int object_id = renderer.addModelInstance(
-    0,
+int ship_obj = renderer.addModelInstance(
+    ship,
     glm::vec3{0.0f, 0.0f, 0.0f},
     glm::vec3{1.0f, 1.0f, 1.0f},
-    0
+    -1
 );
 ```
 
-Parameters:
+`texture_layer = -1` now means:
 
-- `model_id`: which loaded OBJ mesh to instance
-- `position`: world position
-- `scale`: object scale
-- `texture_layer`: which texture layer from the texture array to sample
+- use the mesh part's default material texture if one exists
+- otherwise use the mesh part's material color
 
-That overload is the short form. It creates a material with:
+#### Case B: override the whole instance with one manual texture
 
-- `texture_layer = your value`
-- white tint `vec4(1, 1, 1, 1)`
+```cpp
+int sun_obj = renderer.addModelInstance(
+    sphere,
+    glm::vec3{0.0f, 0.0f, 0.0f},
+    glm::vec3{2.0f, 2.0f, 2.0f},
+    sun_tex
+);
+```
 
-If you want explicit material control, use the material overload:
+That applies the same loaded override texture to every material part of that instance.
+
+#### Case C: use explicit material control
 
 ```cpp
 InstanceMaterial material;
-material.texture_layer = 0;
-material.tint = glm::vec4{1.0f, 0.7f, 0.7f, 1.0f};
+material.texture_layer = -1;
+material.tint = glm::vec4{1.0f, 0.8f, 0.8f, 1.0f};
 
-int object_id = renderer.addModelInstance(
-    0,
+int ship_obj = renderer.addModelInstance(
+    ship,
     glm::vec3{0.0f, 0.0f, 0.0f},
     glm::vec3{1.0f, 1.0f, 1.0f},
     material
 );
 ```
 
-If you want a solid-color object without texture sampling, set `texture_layer` to `-1`:
-
-```cpp
-InstanceMaterial material;
-material.texture_layer = -1;
-material.tint = glm::vec4{0.2f, 0.8f, 1.0f, 1.0f};
-```
+The tint multiplies the final sampled material color.
 
 Return value:
 
 - non-negative value: valid `object_id`
 - `-1`: invalid `model_id`
 
-### 4. Upload instance data before the first draw
-
-After creating instances, push them to the GPU:
-
-```cpp
-renderer.uploadInstanceData();
-```
-
-If you forget this, your objects may exist on the CPU side but not appear correctly on screen.
-
-### 5. Build camera matrices
+### 6. Build camera matrices
 
 `ObjRenderer` does not create camera matrices for you. It expects:
 
@@ -174,7 +187,7 @@ glm::mat4 projection = glm::perspective(
 );
 ```
 
-### 6. Draw every frame
+### 7. Draw every frame
 
 Per-frame usage:
 
@@ -182,7 +195,6 @@ Per-frame usage:
 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 renderer.updateInstanceMatrices();
-renderer.uploadInstanceData();
 renderer.draw(view, projection);
 
 griddraw(view, projection);
@@ -192,8 +204,9 @@ SDL_GL_SwapWindow(window);
 What each step does:
 
 - `updateInstanceMatrices()`: rebuilds model matrices for dirty objects
-- `uploadInstanceData()`: uploads changed matrices and material data
 - `draw(view, projection)`: draws all model instances
+
+`uploadInstanceData()` still exists for compatibility, but it is currently a no-op. You can leave old calls in place, but they are no longer required.
 
 ## Transforming Objects
 
@@ -245,7 +258,7 @@ Use this when another system, such as physics, needs the current render transfor
 
 ## Per-Instance Materials
 
-Each scene instance now has material data as well as transform data.
+Each scene instance has both transform and material data.
 
 Current material fields:
 
@@ -260,63 +273,74 @@ material.tint = glm::vec4{1.0f, 0.4f, 0.4f, 1.0f};
 renderer.setInstanceMaterial(0, object_id, material);
 ```
 
-### Make a textured object brighter or tinted
-
-```cpp
-InstanceMaterial material;
-material.texture_layer = 0;
-material.tint = glm::vec4{1.0f, 1.0f, 0.8f, 1.0f};
-renderer.setInstanceMaterial(0, object_id, material);
-```
-
-### Make an untextured flat-color object
+### Use the mesh's `.mtl` textures with a tint
 
 ```cpp
 InstanceMaterial material;
 material.texture_layer = -1;
-material.tint = glm::vec4{0.0f, 0.8f, 0.4f, 1.0f};
+material.tint = glm::vec4{1.0f, 1.0f, 0.8f, 1.0f};
 renderer.setInstanceMaterial(0, object_id, material);
 ```
 
-The shader behavior is:
+### Override the instance with one manually loaded texture
 
-- `texture_layer >= 0`: sample texture array and multiply by `tint`
-- `texture_layer < 0`: draw only `tint`
+```cpp
+InstanceMaterial material;
+material.texture_layer = sun_tex;
+material.tint = glm::vec4{1.0f, 1.0f, 1.0f, 1.0f};
+renderer.setInstanceMaterial(0, object_id, material);
+```
+
+Current shader behavior:
+
+- if `texture_layer >= 0`, the instance uses that override texture
+- if `texture_layer < 0`, the instance uses the mesh part's `.mtl` texture when present
+- if neither exists, the mesh part falls back to its material color
+- final output is multiplied by `tint`
+
+Current limitation:
+
+- there is no dedicated API for "ignore this textured mesh's `.mtl` texture and draw flat tint only"
 
 ## Working With Multiple Models And Textures
 
-You can load more than one model and more than one texture:
+You can load multiple models and optional override textures:
 
 ```cpp
 ObjRenderer renderer;
-renderer.init(
-    {"assets/check.obj", "assets/earth.obj"},
-    {"assets/map/8k_sun.png", "assets/map/8k_earth_daymap.jpg"}
-);
+renderer.init();
+
+int sun_model = renderer.loadMesh("assets/check.obj");
+int earth_model = renderer.loadMesh("assets/earth.obj");
+
+int sun_tex = renderer.loadTexture("assets/map/8k_sun.png");
+int earth_tex = renderer.loadTexture("assets/map/8k_earth_daymap.jpg");
 ```
 
-Then instantiate them by index:
+Then instantiate them by id:
 
 ```cpp
 int sun = renderer.addModelInstance(
-    0,
+    sun_model,
     glm::vec3{0.0f, 0.0f, 0.0f},
     glm::vec3{2.0f, 2.0f, 2.0f},
-    0
+    sun_tex
 );
 
 int earth = renderer.addModelInstance(
-    1,
+    earth_model,
     glm::vec3{10.0f, 0.0f, 0.0f},
     glm::vec3{1.0f, 1.0f, 1.0f},
-    1
+    earth_tex
 );
 ```
 
 This means:
 
-- `sun` uses model `assets/check.obj` with texture layer `0`
-- `earth` uses model `assets/earth.obj` with texture layer `1`
+- `sun` uses `assets/check.obj` with the loaded `sun_tex` override
+- `earth` uses `assets/earth.obj` with the loaded `earth_tex` override
+
+If you instead want an OBJ's own `.mtl` textures, pass `-1`.
 
 ## Adding A Skybox
 
@@ -324,22 +348,24 @@ This means:
 
 ```cpp
 initskybox({
-		"assets/+X",
-		"assets/-X",
-		"assets/+Y",
-		"assets/-Y",
-		"assets/+Z",
-		"assets/-Z",
-	});
+    "assets/+X",
+    "assets/-X",
+    "assets/+Y",
+    "assets/-Y",
+    "assets/+Z",
+    "assets/-Z",
+});
 ```
-Then in rendering loop add:
+
+Then in the render loop add:
+
 ```cpp
-    drawskybox(view, projection);
+drawskybox(view, projection);
 ```
 
 ## Clearing The Current Scene
 
-If you want to remove the currently spawned objects but keep the renderer, loaded meshes, and textures alive, use:
+If you want to remove the currently spawned objects but keep the renderer, loaded meshes, and loaded textures alive, use:
 
 ```cpp
 renderer.clearScene();
@@ -349,20 +375,26 @@ What `clearScene()` does:
 
 - removes all current instances
 - clears CPU-side instance storage
-- releases the current per-instance GPU buffer storage
-- keeps the loaded model assets and texture array
+- keeps the loaded model assets alive
+- keeps loaded `.mtl` textures and manually loaded override textures alive
 
 Typical use:
 
 ```cpp
 renderer.clearScene();
 
-renderer.addModelInstance(0, glm::vec3{0, 0, 0}, glm::vec3{1, 1, 1}, 0);
-renderer.addModelInstance(1, glm::vec3{5, 0, 0}, glm::vec3{2, 2, 2}, 1);
-renderer.uploadInstanceData();
+renderer.addModelInstance(0, glm::vec3{0, 0, 0}, glm::vec3{1, 1, 1}, -1);
+renderer.addModelInstance(1, glm::vec3{5, 0, 0}, glm::vec3{2, 2, 2}, -1);
 ```
 
-If you want to replace everything, including loaded meshes and textures, call `init(...)` again with a new asset list. `init(...)` already performs a full renderer reset before loading the new scene assets.
+If you want to replace everything, including loaded meshes and textures, call:
+
+```cpp
+renderer.shutdown();
+renderer.init();
+```
+
+Then load new meshes and textures again.
 
 ## Using The Physics Layer
 
@@ -380,10 +412,8 @@ int object_id = renderer.addModelInstance(
     0,
     glm::vec3{0.0f, 0.0f, 0.0f},
     glm::vec3{1.0f, 1.0f, 1.0f},
-    0
+    -1
 );
-
-renderer.uploadInstanceData();
 
 size_t body_id = addDynamicBody(
     0,
@@ -410,7 +440,6 @@ After physics changes transforms, the normal render path still applies:
 
 ```cpp
 renderer.updateInstanceMatrices();
-renderer.uploadInstanceData();
 renderer.draw(view, projection);
 ```
 
@@ -421,7 +450,7 @@ Note:
 
 ## Minimal Example
 
-This is the smallest useful renderer flow in one place:
+This is the smallest useful renderer flow with an OBJ that carries its own `.mtl` textures:
 
 ```cpp
 SDL_Init(SDL_INIT_VIDEO);
@@ -444,18 +473,22 @@ gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
 glEnable(GL_DEPTH_TEST);
 
 ObjRenderer renderer;
-if (!renderer.init({"assets/check.obj"}, {"assets/map/8k_sun.png"})) {
+if (!renderer.init()) {
+  return -1;
+}
+
+int model = renderer.loadMesh(
+    "assets/4c275vutixts-PrometheusNX59650/Prometheus NX 59650/prometheus.obj");
+if (model < 0) {
   return -1;
 }
 
 int object_id = renderer.addModelInstance(
-    0,
+    model,
     glm::vec3{0.0f, 0.0f, 0.0f},
     glm::vec3{1.0f, 1.0f, 1.0f},
-    0
+    -1
 );
-
-renderer.uploadInstanceData();
 
 glm::mat4 view = glm::lookAt(
     glm::vec3(0.0f, 0.0f, -20.0f),
@@ -472,7 +505,6 @@ glm::mat4 projection = glm::perspective(
 
 glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 renderer.updateInstanceMatrices();
-renderer.uploadInstanceData();
 renderer.draw(view, projection);
 SDL_GL_SwapWindow(window);
 ```
@@ -480,16 +512,17 @@ SDL_GL_SwapWindow(window);
 ## Common Mistakes
 
 - Initializing `ObjRenderer` before the OpenGL context exists.
-- Forgetting to call `renderer.uploadInstanceData()` after adding instances.
-- Changing transforms and forgetting the `updateInstanceMatrices()` + `uploadInstanceData()` step before drawing.
+- Expecting `init()` to load meshes or textures. It does not.
+- Loading an OBJ with `map_Kd` textures and then manually reloading those same textures for no reason.
 - Passing an invalid `model_id` to `addModelInstance(...)`.
-- Assuming textures are separate OpenGL textures per object. They are layers in one texture array.
-- Mixing up model index and object instance index.
+- Mixing up `model_id` and `object_id`.
+- Assuming `texture_layer = -1` means "flat untextured color" for every mesh. It now means "use the mesh default material".
+- Forgetting to call `updateInstanceMatrices()` after changing transforms and before drawing.
 - Calling `clearScene()` and then reusing stale physics body links or old `object_id` values.
 
 ## Where To Look Next
 
-- Usage and integration example: [src/main.cpp](/home/plop/projects/game_sdl2/src/main.cpp)
-- Public renderer API: [headers/obj.h](/home/plop/projects/game_sdl2/headers/obj.h)
-- Renderer implementation: [src/objrender.cpp](/home/plop/projects/game_sdl2/src/objrender.cpp)
-- File-by-file documentation: [other_info.md](/home/plop/projects/game_sdl2/other_info.md)
+- Usage and integration example: [src/main.cpp](/home/plop/projects/mygame/src/main.cpp)
+- Public renderer API: [headers/obj.h](/home/plop/projects/mygame/headers/obj.h)
+- Renderer implementation: [src/objrender.cpp](/home/plop/projects/mygame/src/objrender.cpp)
+- File-by-file documentation: [other_info.md](/home/plop/projects/mygame/other_info.md)
